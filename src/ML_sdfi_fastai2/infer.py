@@ -246,9 +246,9 @@ def infer_all(experiment_settings_dict,benchmark_folder,output_folder,show,all_t
     #save images in callback 
 
     infer_with_get_preds_on_all(training,all_files)
-    data_to_save_queue.put(None) # Signal to the 1st save output process that saves data to disk that we are done
-    data_to_save_queue.put(None) # Signal to the 2nd save output process that saves data to disk that we are done
-    print("all data has now been predictied")
+    for process in range(int(experiment_settings_dict["save_workers"])):
+        data_to_save_queue.put(None) # Each save worker needs a Signal to tell it that we are done
+    print("all data has now been predicted")
 
     return []
 
@@ -434,36 +434,37 @@ def main(config):
 
 
     #Default configuration is to use separate processes for loading data(only works on linux) saving data (works on both platforms) and inference (can be done on GPU)
-    save_images_in_separate_proces = True
     #running everything in the same process might be faster if the dataset is very small (skipping overhead for creating and closing down processes and queues )or if there is no GPU available and not enough cpu cores to infer save and load in separate processes on separate cores
-
-    if save_images_in_separate_proces:
-
-
+    #running everything in the same process might also be more cpu-hours efficient
+    if "save_workers" in experiment_settings_dict and int(experiment_settings_dict["save_workers"])>0:
+        #using a set of workers for saving the predictions to disk
         # Create a multiprocessing queue for sending prediction_probabilities_images to be saved to disk as images
         queue = Queue()
-        # Create a process for saving prediction_probabilites as images
-        process1 = Process(target=save_probabilities_as_uint8, args=(queue,))
-        # faster if we have two processes? TODO: we should be able to use a worker pool instead with variable nr of workers
-        process1b = Process(target=save_probabilities_as_uint8, args=(queue,))
+        # Create processes for saving prediction_probabilites as images (one proces for each save_worker 
+        save_inference_proces_workers = [ Process(target=save_probabilities_as_uint8, args=(queue,)) for process in range(int(experiment_settings_dict["save_workers"]))]
+            
+        
         # Create a process for doing inference
-        process2 = Process(target=infer_all, args=(experiment_settings_dict,benchmark_folder,output_folder,show,experiment_settings_dict["path_to_all_benchmarkset_txt"], queue))
+        inference_process = Process(target=infer_all, args=(experiment_settings_dict,benchmark_folder,output_folder,show,experiment_settings_dict["path_to_all_benchmarkset_txt"], queue))
 
         try:
-            # Start both processes
-            process1.start()
-            process1b.start()
-            process2.start()
+            # Start the processes 
+            for proces in save_inference_proces_workers:
+                proces.start()
+            inference_process.start()
 
-            # Wait for the first process to finish
-            process2.join()
-            process1.join()
-            process1b.join()
+            # Wait for the inference proces to finnish
+            inference_process.join()
+
+            # Wait for the save_inference_proces_workers to finish
+            for proces in save_inference_proces_workers:
+                proces.join()
+
         except KeyboardInterrupt:
             # Terminate both processes if Ctrl+C is pressed during the execution
-            process2.terminate()
-            process1.terminate()
-            process1b.terminate()
+            inference_process.terminate()
+            for process in save_inference_proces_workers:
+                process.terminate()
         finally:
             # Close the queue
             queue.close()
