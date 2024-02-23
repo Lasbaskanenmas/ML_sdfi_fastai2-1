@@ -29,6 +29,7 @@ from fastai.vision.core import PILImage, PILMask
 from fastai.vision.data import ImageBlock, MaskBlock, imagenet_stats
 import torchvision.transforms as tfms
 from PIL import Image
+Image.MAX_IMAGE_PIXELS = None
 import numpy as np
 import sys
 from torchvision.models.resnet import resnet34
