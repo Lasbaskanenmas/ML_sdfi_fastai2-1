@@ -15,3 +15,4 @@ dependencies:
   - pip
   - pip:
       - git+https://github.com/rasmuspjohansson/albumentations-multi-channels
+      - git+https://github.com/walkwithfastai/walkwithfastai.github.io

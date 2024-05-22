@@ -26,6 +26,9 @@ def get_model(model_name):
     elif model_name == "simple_convnet":
 
         return pytorch_models.create_custom_model
+    elif model_name in ["efficientnetv2_s" ,"efficientnetv2_m","efficientnetv2_l"]:
+        #using a timm  backbone. this will be handeled by the wwf.timm_learner
+        return model_name
     else:
         sys.exit("utils.utils.py get_mode(model_name) did not recognize model_name:"+str(model_name))
 

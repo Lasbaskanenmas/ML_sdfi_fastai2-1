@@ -41,6 +41,27 @@ import time
 import pathlib
 import shutil
 import utils.utils as sdfi_utils
+from wwf.vision.timm import *
+
+def make_deterministic():
+    print("making the training repeatable so that differetn runs easier can be compared to each other")
+    print("as part of this , num workersis set to 1")
+    # Set environment variables for deterministic behavior
+    os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
+    os.environ['PYTHONHASHSEED'] = '0'
+
+    # Set seeds for Python, NumPy, and PyTorch
+    random.seed(0)
+    np.random.seed(0)
+    torch.manual_seed(0)
+    torch.cuda.manual_seed(0)
+    torch.cuda.manual_seed_all(0)
+
+    # Set PyTorch to use deterministic algorithms
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
 class SkipToEpoch(Callback):
     """
     fastai2 does not support the start_epoch functionality that existed in fastai1. 
@@ -166,7 +187,7 @@ class basic_traininFastai2:
 
         if self.experiment_settings_dict["sceduler"] =="fit_one_cycle":
             self.learn.fit_one_cycle(n_epoch=self.experiment_settings_dict["epochs"], lr_max=lr_max,
-                                     cbs=[GradientClip(0.05),SkipToEpoch(start_epoch=start_epoch),SaveModelCallback(every_epoch= True, monitor='valid_loss', fname=self.experiment_settings_dict["job_name"]),
+                                     cbs=[GradientClip(float(self.experiment_settings_dict["gradient_clip"])),SkipToEpoch(start_epoch=start_epoch),SaveModelCallback(every_epoch= True, monitor='valid_loss', fname=self.experiment_settings_dict["job_name"]),
                                           CSVLogger(fname= self.experiment_settings_dict["job_name"]+".csv", append=True),
                                           DoThingsAfterBatch(n_batch=n_batch)
                                           ])
@@ -228,11 +249,25 @@ class basic_traininFastai2:
             print("weighting all classes equally!")
             a_loss_func= CrossEntropyLossFlat(axis=1,ignore_index=ignore_index)
         
+        if self.experiment_settings_dict["model"] in ["efficientnetv1_m","efficientnetv2_m","efficientnetv2_l"]:
+            #using a timm_learner from the wwf library (walk faster with fastai)
+            input("building tim based unet learner with wwtf library: pres enter to continue")
+        input("rremember n_out,  handle pretrained better")
+        if self.experiment_settings_dict["model"] in ["efficientnetv2_s","efficientnetv2_m","efficientnetv2_l"]:
+            pretrained = False
+        else:
+            pretrained=True
+        if self.experiment_settings_dict["model"] in ["efficientnetv2_s","efficientnetv2_m","efficientnetv2_l"]:
 
-        # fastai asumes 'model_dir' to be a path that is relative to 'path'. In order to make model_dir independent of 'path' we need to make the model_dir path absolute with 'resolve()' first.
-        learn = unet_learner(dls, self.experiment_settings_dict["model"], loss_func=a_loss_func,metrics=valid_accuracy, wd=1e-2,
+            learn = timm_unet_learner(dls, self.experiment_settings_dict["model"], loss_func=a_loss_func,metrics=valid_accuracy, wd=1e-2,
+                             path= self.experiment_settings_dict["log_folder"],pretrained=pretrained,
+                             model_dir=self.experiment_settings_dict["model_folder"] ,n_in=len(experiment_settings_dict["means"]))#callback_fns=[partial(CSVLogger, filename= experiment_settings_dict["job_name"], append=True)])
+        else:
+            # fastai asumes 'model_dir' to be a path that is relative to 'path'. In order to make model_dir independent of 'path' we need to make the model_dir path absolute with 'resolve()' first.
+            learn = unet_learner(dls, self.experiment_settings_dict["model"], loss_func=a_loss_func,metrics=valid_accuracy, wd=1e-2,
                              path= self.experiment_settings_dict["log_folder"],
                              model_dir=self.experiment_settings_dict["model_folder"] ,n_in=len(experiment_settings_dict["means"]))#callback_fns=[partial(CSVLogger, filename= experiment_settings_dict["job_name"], append=True)])
+
 
         return learn
 
@@ -326,10 +361,16 @@ if __name__ == "__main__":
 
 
     parser.add_argument("-c", "--config", help="one or more paths to experiment config file",nargs ='+',required=True)
+    parser.add_argument('--deterministic', action='store_true', help='tries to make different trainings comparable and repeatable')
+
     args = parser.parse_args()
 
 
     for config_file_path in args.config:
         experiment_settings_dict= sdfi_utils.load_settings_from_config_file(config_file_path)
+        if args.deterministic:
+            experiment_settings_dict["num_workers"]= 1
+            make_deterministic()
+
         infer_model_and_log_folders(experiment_settings_dict)
         train(experiment_settings_dict=experiment_settings_dict)
