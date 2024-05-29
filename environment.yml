@@ -1,5 +1,7 @@
 name: ML_sdfi
 channels:
+  - pytorch-nightly
+  - nvidia
   - conda-forge
   - fastchan
   - pytorch
@@ -12,6 +14,9 @@ dependencies:
   - reportlab
   - psutil
   - rasterio
+  - torchvision==0.17.1
+  - pytorch==2.2.1
+  - pytorch-cuda=12.1
   - pip
   - pip:
       - git+https://github.com/rasmuspjohansson/albumentations-multi-channels
