@@ -97,7 +97,7 @@ class AlbumentationsTransform(DisplayedTransform):
 
 #For some reason it looks like we need to create a separate class inhereting from itemtransform for each albumetation transfomr we want to aply
 #AN alternative way of handling this might be to chain al transforms allready in the aug function we wend to the Itemtransform
-#For the time beeing we use separat classes since it works. Separating the transforms this way might also make it easier to handle rgb-nir images in a sensible way when we want to aply transforms to images with more channels
+#For the time beeing we use separat classes since it works. Separating the transforms this also make it easier to handle rgb-nir images in a sensible way when we want to aply transforms to images with more channels
 
 def get_transforms(experiment_settings_dict):
     """
@@ -110,23 +110,23 @@ def get_transforms(experiment_settings_dict):
     transforms=[]
     for transform_name in experiment_settings_dict["transforms"]:
         if "GaussNoise" == transform_name:
-                transforms.append(SegmentationAlbumentationsTransformGaussNoise())
+                transforms.append(SegmentationAlbumentationsTransformGaussNoise(split_idx=0))
         elif "Transpose" == transform_name:
-                transforms.append(SegmentationAlbumentationsTransformTRanspose())
+                transforms.append(SegmentationAlbumentationsTransformTRanspose(split_idx=0))
         elif "RandomBrightness" == transform_name:
-                transforms.append(SegmentationAlbumentationsTransformBrightness())
+                transforms.append(SegmentationAlbumentationsTransformBrightness(split_idx=0))
         elif "RandomShadow" == transform_name:
-                transforms.append(SegmentationAlbumentationsTransformSHADOW())
+                transforms.append(SegmentationAlbumentationsTransformSHADOW(split_idx=0))
         elif "ShiftScaleRotate" == transform_name:
-                transforms.append(SegmentationAlbumentationsTransformSHIFTSCALEROTATE())
+                transforms.append(SegmentationAlbumentationsTransformSHIFTSCALEROTATE(split_idx=0))
 
 
         elif "VerticalFlip" == transform_name:
-                transforms.append(SegmentationAlbumentationsVerticalFlip())
+                transforms.append(SegmentationAlbumentationsVerticalFlip(split_idx=0))
         elif "HorizontalFlip" == transform_name:
-                transforms.append(SegmentationAlbumentationsHorizontalFlip())
+                transforms.append(SegmentationAlbumentationsHorizontalFlip(split_idx=0))
         elif "RandomRotate90" == transform_name:
-                transforms.append(SegmentationAlbumentationsRandomRotate90())
+                transforms.append(SegmentationAlbumentationsRandomRotate90(split_idx=0))
         elif "channel_dropout" == transform_name:
                 #split_idx=0 == only aply on data in trainingset
                 #order=100 apply after all other transforms (especially after the -mean/std transformation in order to make sure the output is 0)
@@ -210,7 +210,9 @@ class SegmentationAlbumentationsCrop(ItemTransform):
 
 
 class SegmentationAlbumentationsVerticalFlip(ItemTransform):
-    def __init__(self,): self.aug = albumentations.VerticalFlip(p=0.5)
+    def __init__(self,split_idx):
+        ItemTransform.__init__(self,split_idx=split_idx)
+        self.aug = albumentations.VerticalFlip(p=0.5)
     def encodes(self, x):
         img,mask = x
         img= np.transpose(img,(1,2,0))
@@ -218,7 +220,9 @@ class SegmentationAlbumentationsVerticalFlip(ItemTransform):
         aug = self.aug(image=img, mask=np.array(mask))
         return ImageBlockReplacement.MultiChannelImage.create(np.array(np.transpose(aug["image"],(2,0,1)),dtype=np.float32)), PILMask.create(aug["mask"])
 class SegmentationAlbumentationsRandomRotate90(ItemTransform):
-    def __init__(self,): self.aug = albumentations.RandomRotate90(p=0.5)
+    def __init__(self,split_idx):
+        ItemTransform.__init__(self,split_idx=split_idx)
+        self.aug = albumentations.RandomRotate90(p=0.5)
     def encodes(self, x):
         img,mask = x
         img= np.transpose(img,(1,2,0))
@@ -226,7 +230,7 @@ class SegmentationAlbumentationsRandomRotate90(ItemTransform):
         aug = self.aug(image=img, mask=np.array(mask))
         return ImageBlockReplacement.MultiChannelImage.create(np.array(np.transpose(aug["image"],(2,0,1)),dtype=np.float32)), PILMask.create(aug["mask"])
 class SegmentationAlbumentationsHorizontalFlip(ItemTransform):
-    def __init__(self,): self.aug = albumentations.HorizontalFlip(p=0.5)
+    def __init__(self,split_idx): self.aug = albumentations.HorizontalFlip(p=0.5)
     def encodes(self, x):
         img,mask = x
         img= np.transpose(img,(1,2,0))
@@ -235,7 +239,9 @@ class SegmentationAlbumentationsHorizontalFlip(ItemTransform):
         return ImageBlockReplacement.MultiChannelImage.create(np.array(np.transpose(aug["image"],(2,0,1)),dtype=np.float32)), PILMask.create(aug["mask"])
 
 class SegmentationAlbumentationsTransformGaussNoise(ItemTransform):
-    def __init__(self,): self.aug = albumentations.GaussNoise(p=0.5)
+    def __init__(self,split_idx):
+        ItemTransform.__init__(self,split_idx=split_idx)
+        self.aug = albumentations.GaussNoise(p=0.5)
     def encodes(self, x):
     
         img,mask = x
@@ -255,7 +261,9 @@ class SegmentationAlbumentationsTransformGaussNoise(ItemTransform):
         check_for_nan_in_numpy_array(np.array(mask),"after GaussNoise target")
         return ImageBlockReplacement.MultiChannelImage.create( np.array(np.transpose(aug["image"],(2,0,1)),dtype=np.float32)), PILMask.create(aug["mask"])
 class SegmentationAlbumentationsTransformTRanspose(ItemTransform):
-    def __init__(self,): self.aug = albumentations.Transpose(p=0.5)
+    def __init__(self,split_idx):
+        ItemTransform.__init__(self,split_idx=split_idx)
+        self.aug = albumentations.Transpose(p=0.5)
     def encodes(self, x):
 
         img,mask = x
@@ -275,7 +283,9 @@ class SegmentationAlbumentationsTransformTRanspose(ItemTransform):
         return ImageBlockReplacement.MultiChannelImage.create(np.array(np.transpose(aug["image"],(2,0,1))),dtype=np.float32), PILMask.create(aug["mask"])
 
 class SegmentationAlbumentationsTransformBrightness(ItemTransform):
-    def __init__(self): self.aug = albumentations.RandomBrightness(p=0.5)
+    def __init__(self,split_idx):
+        ItemTransform.__init__(self,split_idx=split_idx)
+        self.aug = albumentations.RandomBrightness(p=0.5)
     def encodes(self, x):
         img,mask = x
         #check_for_nan_in_tensor(img,"before brigntes")
@@ -331,7 +341,9 @@ class SegmentationAlbumentationsTransformSHADOW(ItemTransform):
 
 
     """
-    def __init__(self): self.aug = albumentations.RandomShadow(p=0.5)
+    def __init__(self,split_idx):
+        ItemTransform.__init__(self,split_idx=split_idx)
+        self.aug = albumentations.RandomShadow(p=0.5)
     def encodes(self, x):
         img,mask = x
         #albumetations asume the order of the channels is h,w,channels but the tensors are channels,h,w
@@ -371,7 +383,9 @@ class SegmentationAlbumentationsTransformSHADOW(ItemTransform):
         
 
 class SegmentationAlbumentationsTransformSHIFTSCALEROTATE(ItemTransform):
-    def __init__(self): self.aug = ShiftScaleRotate(p=0.5)
+    def __init__(self,split_idx):
+        ItemTransform.__init__(self,split_idx=split_idx)
+        self.aug = ShiftScaleRotate(p=0.5)
     def encodes(self, x):
         if len(x)==2:
             #the transform should be done on both image and label
