@@ -544,10 +544,10 @@ def get_dataset(experiment_settings_dict):
 
 
     #if we use cropping as augmetnation for training we might want to reduce the batchsize during validation to make sure we dont use to much memory
-    #during validation ,batchnorm layer use the running statistics collected during training so it should be safe to use batchsize=1 during validation
+    #during validation ,batchnorm layer use the running statistics collected during training so it should be safe to use batchsize=2 during validation
     # Customize DataLoaders to have different batch sizes
     train_dl = dls.train.new(bs=experiment_settings_dict["batch_size"])
-    valid_dl = dls.valid.new(bs=1)
+    valid_dl = dls.valid.new(bs=2)
 
     # Create a new DataLoaders object with the custom DataLoader instances
     dls = DataLoaders(train_dl, valid_dl)
