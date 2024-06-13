@@ -91,7 +91,7 @@ def fig2img(fig):
 
 
 
-def visualize_image_prediction_and_label(image_path,label_path,prediction_path,show,save,visualization_name,class_remappings,visualization_text= "\n  hover with mouse over label or prediction image-position to get value",afterburn_path=None,save_prediction=False):
+def visualize_image_prediction_and_label(image_path,label_path,prediction_path,show,save,visualization_name,class_remappings,visualization_text= "\n  hover with mouse over label or prediction image-position to get value",afterburn_path=None,save_prediction=False,names=[]):
     """
     #combine all images to a single visualisation
     :param image_path:
@@ -195,7 +195,7 @@ def visualize_image_prediction_and_label(image_path,label_path,prediction_path,s
 
 
 
-    names= ["unknown","asfalt","fliser","grus","ubefestet","green_roof","drivhus","betonflade","brosten","unknown2","solceller"]
+    #names= ["unknown","asfalt","fliser","grus","ubefestet","green_roof","drivhus","betonflade","brosten","unknown2","solceller"]
     patches=[mpatches.Patch(color=cmap(i/10), label=names[i]) for i in range(len(names))]
 
 
@@ -452,7 +452,7 @@ def masked_image_from_image_prediction_label(image_path,label_path,prediction_pa
     return original_and_masked_images
 
 
-def visualize_triplet(image_path,label_path,prediction_path,save,show,class_remappings,afterburn_path = None,save_prediction=False):
+def visualize_triplet(image_path,label_path,prediction_path,save,show,class_remappings,afterburn_path = None,save_prediction=False,names=["unknown","asfalt","fliser","grus","ubefestet","green_roof","drivhus","betonflade","brosten","unknown2","solceller"]):
     """
     Visualize how prediction and label matches together with image,
 
@@ -462,6 +462,7 @@ def visualize_triplet(image_path,label_path,prediction_path,save,show,class_rema
     :param class_remappings: e.g {255:0}
     :return:
     """
+    input("STOP")
     if os.path.isdir(image_path):
         image_dir = image_path
         label_dir = label_path
@@ -475,7 +476,7 @@ def visualize_triplet(image_path,label_path,prediction_path,save,show,class_rema
 
 
             #create  a matplot lib figure with image label prediction and visualization. show to screen i show=True, return a pil image
-            visualize_image_prediction_and_label(image_path,label_path,prediction_path,show=show,save=save,visualization_name="visualized"+image_path.name,class_remappings=class_remappings,afterburn_path=afterburn_path,save_prediction=save_prediction)
+            visualize_image_prediction_and_label(image_path,label_path,prediction_path,show=show,save=save,visualization_name="visualized"+image_path.name,class_remappings=class_remappings,afterburn_path=afterburn_path,save_prediction=save_prediction,names=names)
             '''
             if save:
                 print("saving :"+"visualized"+image_path.name)
@@ -491,7 +492,7 @@ def visualize_triplet(image_path,label_path,prediction_path,save,show,class_rema
         #If the paths point to images we visualize only teh relevant image
 
     else:
-        visualize_image_prediction_and_label(image_path,label_path,prediction_path,show=show,save=save,visualization_name="visualized"+image_path.name,class_remappings=class_remappings,afterburn_path=afterburn_path,save_prediction=save_prediction)
+        visualize_image_prediction_and_label(image_path,label_path,prediction_path,show=show,save=save,visualization_name="visualized"+image_path.name,class_remappings=class_remappings,afterburn_path=afterburn_path,save_prediction=save_prediction,names=names)
         '''
 
         im = masked_image_from_image_prediction_label(image_path=image_path,label_path=label_path,prediction_path=prediction_path,class_remappings={})
@@ -537,6 +538,6 @@ if __name__ == "__main__":
         AfterBurnFolder = None
 
 
-    visualize_triplet(image_path,label_path,prediction_path,save = args.Save,afterburn_path=AfterBurnFolder,show= args.Show,class_remappings={},save_prediction=args.save_prediction)
+    visualize_triplet(image_path,label_path,prediction_path,save = args.Save,afterburn_path=AfterBurnFolder,show= args.Show,class_remappings={},save_prediction=args.save_prediction,names=["unknown","asfalt","fliser","grus","ubefestet","green_roof","drivhus","betonflade","brosten","unknown2","solceller"])
 
 

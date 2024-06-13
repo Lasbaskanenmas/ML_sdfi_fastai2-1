@@ -203,7 +203,7 @@ def add_average_images_to_report(dataset_used_for_benchmarking,report_list,subse
 		# locate the images to show in report
 		for i in range(experiment_settings_dict["nr_of_images_to_show"]):
 			#visualization_image = image_from_mask.masked_image_from_image_prediction_label(image_path=subsets_dictionary["images"][i], label_path=subsets_dictionary["labels"][i],prediction_path=subsets_dictionary["predictions"][i],class_remappings=class_remappings)
-			visualization_image=image_from_mask.visualize_image_prediction_and_label(image_path=subsets_dictionary["images"][i],label_path=subsets_dictionary["labels"][i],prediction_path=subsets_dictionary["predictions"][i],show=False,save=False,visualization_name="NA",class_remappings=class_remappings)
+			visualization_image=image_from_mask.visualize_image_prediction_and_label(image_path=subsets_dictionary["images"][i],label_path=subsets_dictionary["labels"][i],prediction_path=subsets_dictionary["predictions"][i],show=False,save=False,visualization_name="NA",class_remappings=class_remappings,names=open(experiment_settings_dict["path_to_codes"]).read().split())
 			report_list.append(visualization_image)
 
 		report_list.append(page_break)
@@ -234,7 +234,7 @@ def add_worst_images_to_report(dataset_used_for_benchmarking,report_list,subset_
 		# locate the images to show in report
 		for i in range(experiment_settings_dict["nr_of_images_to_show"]):
 			#visualization_image = image_from_mask.masked_image_from_image_prediction_label(image_path=subsets_dictionary["images"][i], label_path=subsets_dictionary["labels"][i],prediction_path=subsets_dictionary["predictions"][i],class_remappings=class_remappings)
-			visualization_image=image_from_mask.visualize_image_prediction_and_label(image_path=subsets_dictionary["images"][i],label_path=subsets_dictionary["labels"][i],prediction_path=subsets_dictionary["predictions"][i],show=False,save=False,visualization_name="NA",class_remappings=class_remappings)
+			visualization_image=image_from_mask.visualize_image_prediction_and_label(image_path=subsets_dictionary["images"][i],label_path=subsets_dictionary["labels"][i],prediction_path=subsets_dictionary["predictions"][i],show=False,save=False,visualization_name="NA",class_remappings=class_remappings,names=open(experiment_settings_dict["path_to_codes"]).read().split())
 			report_list.append(visualization_image)
 
 		report_list.append(page_break)
