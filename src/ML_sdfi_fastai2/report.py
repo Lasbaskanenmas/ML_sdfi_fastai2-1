@@ -58,17 +58,20 @@ def get_training_plot_images(path_to_csv_file,things_to_plot):
 	path_to_csv_file=pathlib.Path(path_to_csv_file)
 	log_folder = path_to_csv_file.parents[0]
 
-	#REMOVING LOSS PLOTS SINCE THEY ARE HARD TO EVALUATE ON
-	#path_to_loss_training_plot = str(path_to_csv_file).replace(".csv","loss_plot.jpg")
-	#values_to_plot=['train_loss', 'valid_loss']
-	#plot_training_curves.create_plot(log_files=[path_to_csv_file],  output_plot_file=path_to_loss_training_plot,values_to_plot=values_to_plot, image_format="jpg",use_log_format=False,ylim=[0, 3.0],show=False,value_in_name="min")
-	#plots_to_visualize.append(PILImage.open(path_to_loss_training_plot))
+	#LOSS PLOTS ARE HARD TO EVALUATE ON
+	path_to_loss_training_plot = str(path_to_csv_file).replace(".csv","loss_plot.jpg")
+	values_to_plot=['train_loss', 'valid_loss']
+	plot_training_curves.create_plot(log_files=[path_to_csv_file],  output_plot_file=path_to_loss_training_plot,values_to_plot=values_to_plot, image_format="jpg",use_log_format=False,ylim=[0, 3.0],show=False,value_in_name="min")
+	plots_to_visualize.append(PILImage.open(path_to_loss_training_plot))
 
 	#things_to_plot = ['valid_accuracy']
 	path_to_accuracy_training_plot = str(path_to_csv_file).replace(".csv","accuracy_plot.jpg")
 	plot_training_curves.create_plot(log_files=[path_to_csv_file],  output_plot_file=path_to_accuracy_training_plot,values_to_plot=things_to_plot, image_format="jpg",use_log_format=False,ylim=[0, 1.0],show=False,value_in_name="max")
+	path_to_accuracy_training_plot_log = str(path_to_csv_file).replace(".csv","accuracy_plot_log.jpg")
+	plot_training_curves.create_plot(log_files=[path_to_csv_file],  output_plot_file=path_to_accuracy_training_plot_log,values_to_plot=things_to_plot, image_format="jpg",use_log_format=True,ylim=[0, 1.0],show=False,value_in_name="max")
 
 	plots_to_visualize.append(PILImage.open(path_to_accuracy_training_plot))
+	plots_to_visualize.append(PILImage.open(path_to_accuracy_training_plot_log))
 
 
 
