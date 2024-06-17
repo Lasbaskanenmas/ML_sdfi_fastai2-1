@@ -253,15 +253,14 @@ class basic_traininFastai2:
             print("weighting all classes equally!")
             a_loss_func= CrossEntropyLossFlat(axis=1,ignore_index=ignore_index)
         
-        if self.experiment_settings_dict["model"] in ["efficientnetv1_m","efficientnetv2_m","efficientnetv2_l","efficientnetv2_rw_s.ra2_in1k"]:
-            #using a timm_learner from the wwf library (walk faster with fastai)
-            input("building tim based unet learner with wwtf library: pres enter to continue")
-            input("rremember n_out,  handle pretrained better")
+        #if self.experiment_settings_dict["model"] in ["efficientnetv1_m","efficientnetv2_m","efficientnetv2_l","efficientnetv2_rw_s.ra2_in1k","efficientnetv2_rw_m.agc_in1k"]:
+        #    #using a timm_learner from the wwf library (walk faster with fastai)
+        #    #input("building tim based unet learner with wwtf library: pres enter to continue")
         if self.experiment_settings_dict["model"] in ["efficientnetv2_s","efficientnetv2_m","efficientnetv2_l"]:
             pretrained = False
         else:
             pretrained=True
-        if self.experiment_settings_dict["model"] in ["efficientnetv2_s","efficientnetv2_m","efficientnetv2_l","efficientnetv2_rw_s.ra2_in1k"]:
+        if self.experiment_settings_dict["model"] in ["efficientnetv2_s","efficientnetv2_m","efficientnetv2_l","efficientnetv2_rw_s.ra2_in1k","efficientnetv2_rw_m.agc_in1k","tf_efficientnetv2_xl.in21k"]:
 
             learn = timm_unet_learner(dls, self.experiment_settings_dict["model"], loss_func=a_loss_func,metrics=valid_accuracy, wd=1e-2,
                              path= self.experiment_settings_dict["log_folder"],pretrained=pretrained,
@@ -272,7 +271,7 @@ class basic_traininFastai2:
                              path= self.experiment_settings_dict["log_folder"],
                              model_dir=self.experiment_settings_dict["model_folder"] ,n_in=len(experiment_settings_dict["means"]))#callback_fns=[partial(CSVLogger, filename= experiment_settings_dict["job_name"], append=True)])
         if self.experiment_settings_dict["to_fp16"]:
-            input("training with mixed precision")
+            print("training with mixed precision")
             return learn.to_fp16()
         else:
             input("not training with mixed precision")
