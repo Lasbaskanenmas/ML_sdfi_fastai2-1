@@ -8,8 +8,9 @@ Main function to call from other modules is  get_dataset(experiment_settings_dic
 
 """
 
-
-
+#this might fix problems with: OSError: [Errno 9] Bad file descriptor  (https://stackoverflow.com/questions/73125231/pytorch-dataloaders-bad-file-descriptor-and-eof-for-workers0)
+import torch.multiprocessing
+torch.multiprocessing.set_sharing_strategy('file_system')
 
 
 import ML_sdfi_fastai2.utils.utils as sdfi_utils
