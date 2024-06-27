@@ -187,7 +187,10 @@ class basic_traininFastai2:
         #IN order to monitor the acuracy we might have to modifie the learner as they talk about here https://forums.fast.ai/t/equivalent-of-add-metrics-in-fastai2/77575/2
         #In order to skip to a a certain epoch before training (and get the Lr of the apropriate part of the LR-scedule we ad a skip_to_epoch callback)
         #If you get problems with nan in training loss it might be a good idea to ad 'GradientClip(0.1)' to the csbs list
-        start_epoch=self.experiment_settings_dict["last_epoch"]+1
+        if self.experiment_settings_dict["last_epoch"]>0:
+            start_epoch=self.experiment_settings_dict["last_epoch"]+1
+        else:
+            start_epoch =0
 
         if self.experiment_settings_dict["sceduler"] =="fit_one_cycle":
             self.learn.fit_one_cycle(n_epoch=self.experiment_settings_dict["epochs"],start_epoch=start_epoch, lr_max=lr_max,

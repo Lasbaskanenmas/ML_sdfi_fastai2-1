@@ -25,17 +25,18 @@ max_nr_of_labels=15
 # all cells with label != background ,and prediction != label should be yellow
 # start by setting everything to red (yellow is to hard to se)
 #NOTE: in some older implementations these were colored CYAN in order to tell them from label != backround && prediction == background
-confusion_matrix_colors =np.array([[red for i in range(max_nr_of_labels)] for i in range(max_nr_of_labels)])
-# all cells with label==background should blue if not predictions == background
+confusion_matrix_colors =np.array([[cyan for i in range(max_nr_of_labels)] for i in range(max_nr_of_labels)])
+# all cells with label==ignore should blue if not predictions == background
 confusion_matrix_colors[0,1:]=blue
 # label == background AND prediction == background ,should be white
-confusion_matrix_colors[0,0]=white
+confusion_matrix_colors[1,1]=white
 # all cells with label == predictions should be green
 for i in range(1,max_nr_of_labels):
     confusion_matrix_colors[i,i]=green
-# all cells with label !=background AND prediction== background ,should be red
-confusion_matrix_colors[1:,0]=red
-
+# all cells with label ==background AND prediction!= background ,should be red
+confusion_matrix_colors[1,2:]=red
+# all cells with label != background AND prediction =background , should be pink
+confusion_matrix_colors[2:,1]=pink
 
 """
 
@@ -462,7 +463,6 @@ def visualize_triplet(image_path,label_path,prediction_path,save,show,class_rema
     :param class_remappings: e.g {255:0}
     :return:
     """
-    input("STOP")
     if os.path.isdir(image_path):
         image_dir = image_path
         label_dir = label_path
