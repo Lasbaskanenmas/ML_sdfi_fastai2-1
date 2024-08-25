@@ -7,7 +7,7 @@ import os
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 import matplotlib
-
+import rasterio
 import matplotlib.patches as mpatches
 
 #colors used when showing for what pixels the label matches the prediction
@@ -105,8 +105,12 @@ def visualize_image_prediction_and_label(image_path,label_path,prediction_path,s
     """
 
     numpy_label= np.squeeze(np.array(Image.open(label_path),dtype=np.uint8))
-    numpy_pred= np.squeeze(np.array(Image.open(prediction_path),dtype=np.uint8))
-
+    try:
+        numpy_pred= np.squeeze(np.array(Image.open(prediction_path),dtype=np.uint8))
+    except:
+        #if probs have been saved instead of the argmax we need to do argmax
+        pred_mask_img = rasterio.open(prediction_path).read()
+        numpy_pred = np.array(pred_mask_img,dtype=float).argmax(axis=0).astype(np.uint8)
 
     if class_remappings != {}:
         (numpy_label,numpy_pred) = remap_classes(numpy_label,numpy_pred,class_remappings)
@@ -320,7 +324,13 @@ def get_prediction_label_match_visualization(label_path,prediction_path,class_re
         print("number of non_zero label_pixels : "+str((numpy_label>0).flatten().sum()))
 
     if prediction_path:
-        numpy_pred = np.array(Image.open(prediction_path),dtype=np.uint8)
+        try:
+            numpy_pred = np.array(Image.open(prediction_path),dtype=np.uint8)
+        except:
+            #if probs have been saved instead of the argmax we need to do argmax
+            pred_mask_img = rasterio.open(prediction_path).read()
+            numpy_pred = np.array(pred_mask_img,dtype=float).argmax(axis=0).astype(np.uint8)
+
     else:
         numpy_pred = numpy_label
 
@@ -386,7 +396,12 @@ def masked_image_from_image_prediction_label(image_path,label_path,prediction_pa
         print("number of non_zero label_pixels : "+str((numpy_label>0).flatten().sum()))
     input_image = Image.open(image_path)
     if prediction_path:
-        numpy_pred = np.array(Image.open(prediction_path),dtype=np.uint8)
+        try:
+            numpy_pred = np.array(Image.open(prediction_path),dtype=np.uint8)
+        except:
+            #if probs have been saved instead of the argmax we need to do argmax
+            pred_mask_img = rasterio.open(prediction_path).read()
+            numpy_pred = np.array(pred_mask_img,dtype=float).argmax(axis=0).astype(np.uint8)
     else:
         numpy_pred = numpy_label
 

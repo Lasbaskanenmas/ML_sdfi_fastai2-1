@@ -15,7 +15,7 @@ import csv
 import time
 import pandas as pd
 import pathlib
-
+import rasterio
 
 
 
@@ -145,9 +145,14 @@ def create_csv_with_prediction_info(experiment_settings_dict):
 
         if os.path.exists(prediction_mask_path) and  os.path.exists(label_mask_path):
             #load predictions and labels
-            pred_mask_img = Image.open(prediction_mask_path)
+            if "prediciton_image_is_probs" in experiment_settings_dict and experiment_settings_dict["prediciton_image_is_probs"]:
+                #prediction image is showing the raw probabilities. in order to get teh predictions we need to do argmax
+                pred_mask_img = rasterio.open(prediction_mask_path).read()
+                numpy_prediction_mask = numpy.array(pred_mask_img,dtype=float).argmax(axis=0).astype(numpy.uint8)
+            else:
+                pred_mask_img = Image.open(prediction_mask_path)
+                numpy_prediction_mask = numpy.array(pred_mask_img)
             label_im = Image.open(label_mask_path)
-            numpy_prediction_mask = numpy.array(pred_mask_img)
             numpy_label_mask = numpy.array(label_im)
 
             ignorer_labels_mask = numpy_label_mask == ignore_index

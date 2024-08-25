@@ -176,6 +176,17 @@ def infer_on_single_image(training,a_file):
         return the_prediction
   
 
+def extend_list_to_multiple_of_x(lst,x):
+    """
+    use this function in order to make dataset divisible by bachsize
+    """
+    length = len(lst)
+    remainder = length % x
+    if remainder != 0:
+        items_to_add = x - remainder
+        lst.extend([lst[-1]] * items_to_add)
+    return lst
+
 def infer_all(experiment_settings_dict,benchmark_folder,output_folder,show,all_txt,data_to_save_queue):
     """
     Replacing infer_on_all 
@@ -199,6 +210,7 @@ def infer_all(experiment_settings_dict,benchmark_folder,output_folder,show,all_t
 
     all_files = Path(all_txt).read_text().split('\n')
     all_files=[Path(benchmark_folder)/Path(experiment_settings_dict["datatypes"][0])/Path(a_path) for a_path in all_files]
+    all_files =extend_list_to_multiple_of_x(all_files,experiment_settings_dict["batch_size"])
     print("####################")
     print("classifying in totall : "+str(len(all_files))+ " nr of images")
     print("segmentation images are saved to: " + str(output_folder))
