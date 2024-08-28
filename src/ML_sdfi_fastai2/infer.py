@@ -268,7 +268,8 @@ def infer_all(experiment_settings_dict,benchmark_folder,output_folder,show,all_t
 
 
 def infer_on_all(experiment_settings_dict,benchmark_folder,output_folder,show,all_txt):
-    print("OBS! this is a depricated function only kept as a refernece")
+    print("OBS! running infer without separate threads for saving output to disk might be much slower than utilizing many threads for saving outut to disk!")
+    print("if running inference on a computer with GPU and many cpu cores, consider using a large batchsize and several feeder workers and saving_workers!")
     infer_on_all_start_time =time.time()
     """
     :param experiment_settings_dict: a dictionary holding the parameters for the trainer that will be used for classification
