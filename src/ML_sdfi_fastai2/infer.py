@@ -76,7 +76,7 @@ class SaveSegmentationOutput(Callback):
                x_index_end = x_index_start+int(self.experiment_settings_dict["crop_size"])
                probs= probs[:,y_index_start:y_index_end,x_index_start:x_index_end]
             file_name = fname.name
-            self.data_to_save_queue.put((probs, self.save_path/file_name,new_meta))
+            self.data_to_save_queue.put((probs, self.save_path/file_name,new_meta,self.experiment_settings_dict))
 
             #save_probabilities_as_uint8_no_queue(probs=probs, path_to_probabilities= str(self.save_path / f"{file_stem}_callback_prob.png"),new_meta=new_meta)
         print("callback took: "+str(time.time() - call_back_start))
@@ -123,7 +123,9 @@ def save_probabilities_as_uint8(queue):
                 print("totall time spent saving:"+str(totall_time_spent_saving))
                 break  # End the loop when None is received
             saving_data_start_time = time.time()
-            (probs,path_to_probabilities,new_meta) = data_from_queue
+            (probs,path_to_probabilities,new_meta,experiment_settings_dict) = data_from_queue
+            '''
+
             # probabilities are floats scaled by multiplication and converted to uint8
             new_meta["count"] = probs.shape[0]
             new_meta["dtype"] = np.uint8
@@ -133,6 +135,36 @@ def save_probabilities_as_uint8(queue):
             took=time.time()-saving_data_start_time
             print("saving a single image to disk in the separatte thread took: "+str(took))
             totall_time_spent_saving+=took
+            '''
+            if experiment_settings_dict["save_probs"]:
+                # probabilities are floats scaled by multiplication and converted to uint8
+                new_meta["count"] = probs.shape[0]
+                new_meta["dtype"] = np.uint8
+                #update name to show that it includes probs and not predictions
+                path_to_probabilities = Path(path_to_probabilities).parent/("PROBS_"+Path(path_to_probabilities).name)
+
+                with rasterio.open(path_to_probabilities, "w", **new_meta) as dest:
+                    dest.write(np.array((probs *255),dtype=np.uint8))
+                took=time.time()-saving_data_start_time
+                print("saving a single image to disk in the separatte thread took: "+str(took))
+                totall_time_spent_saving+=took
+            elif experiment_settings_dict["save_preds"]:
+                preds = np.array(probs.argmax(axis=0),dtype=np.uint8) # since this is a numpy array and not a pytorch array . we now need to use axis=0 instead of dim=0
+                new_meta["count"]=1
+                new_meta["dtype"]=np.uint8
+                with rasterio.open(path_to_probabilities, "w", **new_meta) as dest:
+                    dest.write(np.expand_dims(preds,axis=0))
+                took=time.time()-saving_data_start_time
+                print("saving a single image to disk in the separatte thread took: "+str(took))
+                totall_time_spent_saving+=took
+
+
+
+
+
+
+
+
     except KeyboardInterrupt:
         # Handle Ctrl+C gracefully by terminating the process
         pass
@@ -184,7 +216,10 @@ def extend_list_to_multiple_of_x(lst,x):
     remainder = length % x
     if remainder != 0:
         items_to_add = x - remainder
-        lst.extend([lst[-1]] * items_to_add)
+        #for i in range(items_to_add):
+        extra_items= [lst[i] for i in range(items_to_add)]
+        lst.extend(extra_items)
+        #lst.extend([lst[-1]] * items_to_add)
     return lst
 
 def infer_all(experiment_settings_dict,benchmark_folder,output_folder,show,all_txt,data_to_save_queue):
@@ -210,13 +245,16 @@ def infer_all(experiment_settings_dict,benchmark_folder,output_folder,show,all_t
 
     all_files = Path(all_txt).read_text().split('\n')
     all_files=[Path(benchmark_folder)/Path(experiment_settings_dict["datatypes"][0])/Path(a_path) for a_path in all_files]
+
+
+    #make sure that all files are of correct type
+    im_type= experiment_settings_dict["im_type"]
+    all_files=[im_file for im_file in all_files if im_type in im_file.name]
     all_files =extend_list_to_multiple_of_x(all_files,experiment_settings_dict["batch_size"])
     print("####################")
     print("classifying in totall : "+str(len(all_files))+ " nr of images")
     print("segmentation images are saved to: " + str(output_folder))
-    #make sure that all files are of correct type
-    im_type= experiment_settings_dict["im_type"]
-    all_files=[im_file for im_file in all_files if im_type in im_file.name]
+
     print(str(experiment_settings_dict))
 
 
@@ -229,7 +267,7 @@ def infer_all(experiment_settings_dict,benchmark_folder,output_folder,show,all_t
     training.learn.load(str(pathlib.Path(experiment_settings_dict["model_to_load"]).resolve()).rstrip(".pth"))
 
     #classify all images in benchmark_folder
-    dl = training.learn.dls.test_dl(all_files,num_workers=2) # dl = training.learn.dls.test_dl(all_files) #
+    dl = training.learn.dls.test_dl(all_files,num_workers=experiment_settings_dict["num_workers"]) # dl = training.learn.dls.test_dl(all_files) #
 
 
     #ad callback that saves predictions to disk
