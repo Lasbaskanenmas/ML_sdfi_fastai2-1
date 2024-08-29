@@ -15,7 +15,7 @@ def process_geotiff(input_path, output_path):
         # Define the metadata for the output file
         metadata = src.meta.copy()
         metadata.update({
-            'dtype': 'uint16',  # Update the data type to accommodate the new values
+            'dtype': 'int32',  # Update the data type to accommodate the new values
             'count': 1  # We are only processing one band
         })
         

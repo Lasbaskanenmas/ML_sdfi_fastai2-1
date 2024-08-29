@@ -444,7 +444,7 @@ def get_dataset(experiment_settings_dict):
     #label_func = lambda o: pth / ('labels/masks/') / f'{o.stem}{o.suffix}'
     def label_func(image_pathlib_path):
         label_path =  label_folder / f'{image_pathlib_path.stem}{label_type}'
-        return np.array(Image.open(label_path))
+        return np.array(Image.open(label_path),dtype=np.int32)
     def building_func(image_pathlib_path):
         building_path =  Path(experiment_settings_dict["path_to_buildings"]) / f'{image_pathlib_path.stem}{label_type}'
         return np.array(Image.open(building_path))
