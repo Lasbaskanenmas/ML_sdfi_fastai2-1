@@ -44,6 +44,10 @@ import shutil
 import utils.utils as sdfi_utils
 from wwf.vision.timm import *
 from fastai.vision.all import GradientAccumulation
+print("TEMPRYRARY DDEACTIVATING SSL CHECK ON DELPHI")
+import ssl
+ssl._create_default_https_context = ssl._create_unverified_context
+
 
 def make_deterministic():
     print("making the training repeatable so that differetn runs easier can be compared to each other")
@@ -362,7 +366,7 @@ if __name__ == "__main__":
     
     
     """
-    usage_example="example usage: \n "+r"python train.py --config configs/example_configs/train_example_dataset.ini"
+    usage_example="example usage: \n "+r"python train.py --config configs/example_configs/train_example_dataset.ini \n to use anotehr GPU than 0 call it like this \n CUDA_VISIBLE_DEVICES= python train.py   "
     # Initialize parser
     parser = argparse.ArgumentParser(
                                     epilog=usage_example,

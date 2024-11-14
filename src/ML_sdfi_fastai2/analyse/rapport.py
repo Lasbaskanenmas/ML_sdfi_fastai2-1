@@ -155,14 +155,14 @@ def create_pdf_report(dataset,predicted_images_paths_list,nr_of_images_to_show,a
     pkl_filename= pathlib.Path(report_cache_directory ) / pathlib.Path(str(nr_of_images_to_show)+"_images_sorted_on_"+sorting_description+"_"+property_to_sort_on+dataset_name+"_"+"_"+subset_name+"_.pkl")
     
     #all other images are added to the first image and converted to pdf
-    first_im= im_list[0]
+    #first_im= im_list[0]
     im_list= im_list[1:]
     if average_images:
         pdf_filename = pdf_filename.parent/pdf_filename.name.replace(".pdf","indexed_from_"+str(index_of_first_sorted_image_to_show)+".pdf")
         pkl_filename= pdf_filename.parent/pkl_filename.name.replace(".pkl","indexed_from_"+str(index_of_first_sorted_image_to_show)+".pkl")
 
     #save pdf and pkl files
-    first_im.convert("RGB").save(pdf_filename, "PDF" ,resolution=100.0, save_all=True, append_images=[im.convert("RGB") for im in im_list])
+    #first_im.convert("RGB").save(pdf_filename, "PDF" ,resolution=100.0, save_all=True, append_images=[im.convert("RGB") for im in im_list])
     pickle.dump(predicted_images_paths_list, open(pkl_filename, "wb" ) )
 
 '''
@@ -468,7 +468,6 @@ def main(experiment_settings_dict):
  
 
         subset_files = get_files_in_subset(subset_file)
-        input(subset_files)
 
         
         #input(pandas_dataframe)

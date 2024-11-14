@@ -33,6 +33,8 @@ def create_csv_with_prediction_info(experiment_settings_dict):
     """
     # create list of categories e.g ["Baggrund","Bygning","Skov","Vej","Vand","Mark"]
     categories = [line.rstrip() for line in open(experiment_settings_dict["path_to_codes"]).readlines()]
+    #input(categories)
+ 
 
     path_to_labels= experiment_settings_dict["path_to_labels"]
     test_set= experiment_settings_dict["dataset_folder"].name  #the name of the dataset e.g 'AmagerLangeland1000p160mmRTO' or CAMVID_TESTIMAGES
@@ -54,7 +56,7 @@ def create_csv_with_prediction_info(experiment_settings_dict):
         ignore_index = experiment_settings_dict["ignore_index"]
     else:
         #sdfi default ignore index.
-        ignore_index = 255
+        sys.exit("define ignore_index")
 
     if selection ==None:
         all_file_dicts = []
@@ -156,12 +158,14 @@ def create_csv_with_prediction_info(experiment_settings_dict):
             numpy_label_mask = numpy.array(label_im)
 
             ignorer_labels_mask = numpy_label_mask == ignore_index
+            not_ignorer_labels_mask = numpy_label_mask != ignore_index
 
             # set the area with ignorer index to the ignorer index value as in the label mask
-            numpy_prediction_mask[ignorer_labels_mask] = ignore_index
+            #this is not correct!!! numpy_prediction_mask[ignorer_labels_mask] = ignore_index
             # pred_mask_img = pred_mask_img_with_ignore_index[ignorer_labels]
 
             nr_of_ignorer_pixels = sum((ignorer_labels_mask * 1).flatten())
+            nr_of_not_ignorer_pixels = sum((not_ignorer_labels_mask * 1).flatten())
 
 
             #print("nr of ignorer index pixels = {}".format(nr_of_ignorer_pixels))
@@ -184,7 +188,7 @@ def create_csv_with_prediction_info(experiment_settings_dict):
 
             for category in range(len(categories)):
                 label_mask = numpy_label_mask ==category
-                prediction_mask =numpy_prediction_mask==category
+                prediction_mask =(numpy_prediction_mask==category)*not_ignorer_labels_mask
 
                 #CREATE UNIONS and INTERSECTIONS OF PREDICTION AND MASK
                 intersection_of_prediction_and_label= prediction_mask*label_mask
@@ -201,17 +205,26 @@ def create_csv_with_prediction_info(experiment_settings_dict):
             #CONFUSION MATRIX and ERROR RATE
             confusion_matrix = numpy.zeros([len(categories),len(categories)])
             errors=0
+
             for category_label in range(len(categories)):
                 label_mask = numpy_label_mask == category_label
                 for category_prediction in range(len(categories)):
-                    prediction_mask = numpy_prediction_mask == category_prediction
+                    #we do not consider predictions in the ignore_label areas
+                    prediction_mask = (numpy_prediction_mask == category_prediction) #*not_ignorer_labels_mask
                     #how many pixels of category_label are classified as category_prediction
                     intersection_of_prediction_and_label = prediction_mask * label_mask
                     nr_of_category_label_pixels_classified_as_category_prediction = numpy.count_nonzero(intersection_of_prediction_and_label)
                     confusion_matrix[category_label,category_prediction]+=nr_of_category_label_pixels_classified_as_category_prediction
-                    if category_label !=category_prediction:
-                        errors+=nr_of_category_label_pixels_classified_as_category_prediction
+                    #if category_label !=category_prediction:
+                    #    errors+=nr_of_category_label_pixels_classified_as_category_prediction
             nr_of_pixels=sum(confusion_matrix.flatten())
+            errors = sum((numpy_label_mask!=numpy_prediction_mask).flatten())-nr_of_ignorer_pixels
+            print(nr_of_ignorer_pixels)
+            print(str(sum((numpy_label_mask!=numpy_prediction_mask).flatten())))
+            #input(errors)
+
+
+
             # print(confusion_matrix)
 
 
@@ -224,7 +237,7 @@ def create_csv_with_prediction_info(experiment_settings_dict):
                 print("max nr in label is: "+str(numpy_label_mask.max()))
                 print("max nr in predictions is: "+str(numpy_prediction_mask.max()))
 
-            error_rate=errors/nr_of_pixels
+            error_rate=(errors)/(nr_of_pixels-nr_of_ignorer_pixels)
 
             #WRITE FILENAME IOU AND ERROR RATES TO csv
             data= [image_file_path,error_rate]+iou_scores +[json.dumps(confusion_matrix.tolist())]
