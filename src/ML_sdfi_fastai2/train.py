@@ -262,7 +262,7 @@ class basic_traininFastai2:
             print("weighting all classes equally!")
             a_loss_func= CrossEntropyLossFlat(axis=1,ignore_index=ignore_index)
 
-        if self.experiment_settings_dict["model"] in ["efficientnetv1_m","efficientnetv2_m","efficientnetv2_l","efficientnetv2_rw_s.ra2_in1k","efficientnetv2_rw_m.agc_in1k","tf_efficientnetv2_l.in21k","tf_efficientnetv2_xl.in21k"]:
+        if "bottleneck" in self.experiment_settings_dict or  self.experiment_settings_dict["model"] in ["efficientnetv1_m","efficientnetv2_m","efficientnetv2_l","efficientnetv2_rw_s.ra2_in1k","efficientnetv2_rw_m.agc_in1k","tf_efficientnetv2_l.in21k","tf_efficientnetv2_xl.in21k"]:
             #using a timm_learner from the wwf library (walk faster with fastai)
             print("building tim based unet learner with wwtf library...")
 

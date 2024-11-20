@@ -26,7 +26,7 @@ def get_model(model_name):
     elif model_name == "simple_convnet":
 
         return pytorch_models.create_custom_model
-    elif model_name in ["efficientnetv2_s" ,"efficientnetv2_m","efficientnetv2_l","efficientnetv2_rw_s.ra2_in1k","efficientnetv2_rw_m.agc_in1k","tf_efficientnetv2_l.in21k","tf_efficientnetv2_xl.in21k"]:
+    elif model_name in ["efficientnetv2_s" ,"efficientnetv2_m","efficientnetv2_l","efficientnetv2_rw_s.ra2_in1k","efficientnetv2_rw_m.agc_in1k","tf_efficientnetv2_l.in21k","tf_efficientnetv2_xl.in21k","resnet50.a1_in1k"]:
         #using a timm  backbone. this will be handeled by the wwf.timm_learner
         return model_name
     else:
