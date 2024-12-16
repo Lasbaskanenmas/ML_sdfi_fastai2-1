@@ -44,9 +44,6 @@ import shutil
 import utils.utils as sdfi_utils
 from wwf.vision.timm import *
 from fastai.vision.all import GradientAccumulation
-print("TEMPRYRARY DDEACTIVATING SSL CHECK ON DELPHI")
-import ssl
-ssl._create_default_https_context = ssl._create_unverified_context
 
 
 def make_deterministic():
@@ -68,28 +65,25 @@ def make_deterministic():
     torch.backends.cudnn.benchmark = False
 
 
-#depricated since we now can use start_epochs argumetn to fit_one_cykle
-'''
-class SkipToEpoch(Callback):
-    """
-    fastai2 does not support the start_epoch functionality that existed in fastai1. 
-    this class is taken from the link below and meant to  repliate the functionality of start_epoch argument
-    
-    https://forums.fast.ai/t/resuming-fit-one-cycle-with-model-from-savemodelcallback/72268
-    use like this 
-    learn.fit_one_cycle(1,3e-3, cbs=cbs+SkipToEpoch(start_epoch))
 
+class CSVLoggerWithLR(CSVLogger):
+    def after_epoch(self):
+        # Get the current learning rates from the optimizer
+        current_lrs = [group['lr'] for group in self.learn.opt.param_groups]
 
-    """
-    order = ProgressCallback.order + 1
-    def __init__(self, start_epoch:int):
-        self._skip_to = start_epoch
+        # Extend the log with learning rates
+        log_values = self.learn.recorder.log + current_lrs
 
-    def before_epoch(self):
-        if self.epoch < self._skip_to:
-            raise CancelEpochException
+        # Ensure the header includes learning rate columns
+        if not hasattr(self, 'header_written') or not self.header_written:
+            lr_headers = [f'lr_{i}' for i in range(len(current_lrs))]
+            self.file.write(','.join(self.learn.recorder.metric_names + lr_headers) + '\n')
+            self.header_written = True
 
-'''
+        # Write the log values to the CSV file
+        self.file.write(','.join(map(str, log_values)) + '\n')
+        self.file.flush()
+
 class DoThingsAfterBatch(Callback):
     """
     Save model after n batch
@@ -199,7 +193,7 @@ class basic_traininFastai2:
         if self.experiment_settings_dict["sceduler"] =="fit_one_cycle":
             self.learn.fit_one_cycle(n_epoch=self.experiment_settings_dict["epochs"],start_epoch=start_epoch, lr_max=lr_max,
                                      cbs=[GradientAccumulation(self.experiment_settings_dict["n_acc"]),GradientClip(self.experiment_settings_dict["gradient_clip"]),SaveModelCallback(with_opt=True,every_epoch= True, monitor='valid_loss', fname=self.experiment_settings_dict["job_name"]),
-                                          CSVLogger(fname= self.experiment_settings_dict["job_name"]+".csv", append=True),
+                                          CSVLoggerWithLR(fname= self.experiment_settings_dict["job_name"]+".csv", append=True),
                                           DoThingsAfterBatch(n_batch=n_batch)
                                           ])
         elif self.experiment_settings_dict["sceduler"] =="fixed":
@@ -305,6 +299,51 @@ def train(experiment_settings_dict):
     print("loading the dataset..")
     dls = sdfi_dataset.get_dataset(experiment_settings_dict)
 
+    # Define a transfomr that just prints out the 
+    '''
+    class PrintStatsTransform(Transform):
+        order = 200  # Ensures this runs last
+        max =0
+        min = 100
+        def encodes(self, x: torch.Tensor):
+            # Apply only if the input is a Tensor with 4 dimensions (batch of images)
+            if isinstance(x, torch.Tensor) and x.ndim == 4:
+                # Calculate statistics
+                print(np.array(x.cpu()))
+                print(x.shape)
+                for i in range(11):
+                    print(f"min Channel {i}:")
+                    print(np.array(x.cpu())[:,i,:,:].flatten().min())
+                    if np.array(x.cpu())[:,i,:,:].flatten().min() < self.min:
+                        self.min = np.array(x.cpu())[:,i,:,:].flatten().min()
+
+
+                for i in range(11):
+                    print(f"max Channel {i}:")
+                    print(np.array(x.cpu())[:,i,:,:].flatten().max())
+                    if np.array(x.cpu())[:,i,:,:].flatten().max() > self.max:
+                        self.max = np.array(x.cpu())[:,i,:,:].flatten().max()
+
+
+                for i in range(11):
+                    print(f"mean Channel {i}:")
+                    print(np.array(x.cpu())[:,i,:,:].flatten().mean())
+
+                for i in range(11):
+                    print(f"std Channel {i}:")
+                    print(np.array(x.cpu())[:,i,:,:].flatten().std())
+
+                print("min encountered = "+str(self.min))
+                print("max encountered = "+str(self.max))
+
+                # Print the statistics
+                #print(f"Max: {max_val:.4f}, Min: {min_val:.4f}, Mean: {mean_val:.4f}, Std: {std_val:.4f}")
+                # Return the input unchanged
+            return x
+    # Add the custom transform to the `after_batch` pipeline
+    dls.after_batch.add(PrintStatsTransform())
+    '''
+ 
     print("setting up a unet training..")
     training= basic_traininFastai2(experiment_settings_dict,dls)
 

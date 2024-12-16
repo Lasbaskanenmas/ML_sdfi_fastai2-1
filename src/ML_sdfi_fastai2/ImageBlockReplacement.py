@@ -237,6 +237,10 @@ def load_all_datasources_for_image(path,experiment_settings_dict):
         #loaded_images.append(without_unwanted_channels)
     loaded_images_as_array= np.array(as_array,dtype=np.float32)
 
+    #set all no value data (typical -99999) to 0 
+    # Set all values less than -100 to 0
+    loaded_images_as_array[loaded_images_as_array < -100] = 0
+
 
     return  loaded_images_as_array#loaded_images_as_array
 

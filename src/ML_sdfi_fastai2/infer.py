@@ -17,7 +17,7 @@ from torch.multiprocessing import Process, Queue
 from fastai.vision.all import *
 #torch.multiprocessing.set_start_method('spawn') # otherwise we get : Error	"Cannot re-initialize CUDA in forked subprocess. To use CUDA with multiprocessing, you must use the 'spawn' start method"
 #if not torch.multiprocessing.get_start_method(allow_none=True):
-    #this is nly alowed to be set once. and the if statement above makes sure its only set once
+#    #this is nly alowed to be set once. and the if statement above makes sure its only set once
 #    torch.multiprocessing.set_start_method('spawn') # otherwise we get : Error      "Cannot re-initialize CUDA in forked subprocess. To use CUDA with multiprocessing, you must use the 'spa>
 
 
@@ -497,9 +497,9 @@ def ad_values_nececeary_for_dataset_loader_creation(experiment_settings_dict):
 
 def main(config):
 
-    #if not torch.multiprocessing.get_start_method(allow_none=True):
-    #    #this is nly alowed to be set once. and the if statement above makes sure its only set once
-    #    torch.multiprocessing.set_start_method('spawn') # otherwise we get : Error      "Cannot re-initialize CUDA in forked subprocess. To use CUDA with multiprocessing, you must use the 'spa>
+    if not torch.multiprocessing.get_start_method(allow_none=True):
+        #this is nly alowed to be set once. and the if statement above makes sure its only set once
+        torch.multiprocessing.set_start_method('spawn') # otherwise we get : Error      "Cannot re-initialize CUDA in forked subprocess. To use CUDA with multiprocessing, you must use the 'spa>
 
 
 

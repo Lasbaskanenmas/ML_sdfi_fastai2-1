@@ -56,9 +56,7 @@ def load_settings_from_config_file(config_file_path):
         else:
             print("loading settings in the : "+str(section)+" section")
             for key in parser[section]:
-                print("key:"+str(key))
                 value_for_key = parser[section][key]
-                print("value_for_key:"+str(value_for_key))
 
                 if key == "model":
                     settings_dictionary[key] = get_model(value_for_key)
@@ -70,7 +68,7 @@ def load_settings_from_config_file(config_file_path):
                 elif section in ["FOLDERS","DATASET"]:
                     settings_dictionary[key] = Path(value_for_key)
                 else:
-                    settings_dictionary[key] = json.loads(value_for_key)
+                    settings_dictionary[key] = json.loads(str(value_for_key))
 
     print("######################################### FINNISHED PARSING THE SETTINGS FILE#################################################")
     print("##############################################################################################################################")
