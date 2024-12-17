@@ -45,6 +45,10 @@ import utils.utils as sdfi_utils
 from wwf.vision.timm import *
 from fastai.vision.all import GradientAccumulation
 
+from fastai.callback.core import Callback
+
+from fastai.learner import Callback, CancelBatchException, CancelEpochException
+
 
 def make_deterministic():
     print("making the training repeatable so that differetn runs easier can be compared to each other")
@@ -189,6 +193,7 @@ class basic_traininFastai2:
             start_epoch=self.experiment_settings_dict["last_epoch"]+1
         else:
             start_epoch =0
+
 
         if self.experiment_settings_dict["sceduler"] =="fit_one_cycle":
             self.learn.fit_one_cycle(n_epoch=self.experiment_settings_dict["epochs"],start_epoch=start_epoch, lr_max=lr_max,

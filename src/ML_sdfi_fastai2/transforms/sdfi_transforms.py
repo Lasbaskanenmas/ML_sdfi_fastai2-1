@@ -141,7 +141,7 @@ def get_transforms(experiment_settings_dict):
                 #split_idx=0 == only aply on data in trainingset
                 #order=100 apply after all other transforms 
                 #Normalize.from_stats has order 99 so 100 will cause the channel coruption to be aplied after the normalizations
-                transforms.append(SegmentationAlbumentationsChannelCorruption(corruptible_channels=experiment_settings_dict["channel_coruption"], p_rotate=0.1, p_flip=0.1, split_idx=0, order=100))
+                transforms.append(SegmentationAlbumentationsChannelCorruption(corruptible_channels=experiment_settings_dict["channel_coruption"], p_rotate=0.025, p_flip=0.025, split_idx=0, order=100))
         else:
             input(" no transform with name :"+str(transform_name))
     return transforms
@@ -179,7 +179,7 @@ def check_for_nan_in_numpy_array(array,info="info to show if there are nans"):
 class SegmentationAlbumentationsChannel_dropout(ItemTransform):
     def __init__(self,droppable_channels,split_idx=0, order=100):
         ItemTransform.__init__(self,split_idx=split_idx, order=order)
-        self.aug = albumentations.augmentations.dropout.channel_dropout.ChannelDropout(p=0.1,droppable_channels=droppable_channels)
+        self.aug = albumentations.augmentations.dropout.channel_dropout.ChannelDropout(p=0.05,droppable_channels=droppable_channels)
 
 
     def encodes(self, x):
@@ -226,7 +226,7 @@ class SegmentationAlbumentationsCentreCrop(ItemTransform):
 class SegmentationAlbumentationsVerticalFlip(ItemTransform):
     def __init__(self,split_idx):
         ItemTransform.__init__(self,split_idx=split_idx)
-        self.aug = albumentations.VerticalFlip(p=0.5)
+        self.aug = albumentations.VerticalFlip(p=0.05)
     def encodes(self, x):
         img,mask = x
         img= np.transpose(img,(1,2,0))
@@ -236,7 +236,7 @@ class SegmentationAlbumentationsVerticalFlip(ItemTransform):
 class SegmentationAlbumentationsRandomRotate90(ItemTransform):
     def __init__(self,split_idx):
         ItemTransform.__init__(self,split_idx=split_idx)
-        self.aug = albumentations.RandomRotate90(p=0.5)
+        self.aug = albumentations.RandomRotate90(p=0.05)
     def encodes(self, x):
         img,mask = x
         img= np.transpose(img,(1,2,0))
@@ -244,7 +244,7 @@ class SegmentationAlbumentationsRandomRotate90(ItemTransform):
         aug = self.aug(image=img, mask=np.array(mask))
         return ImageBlockReplacement.MultiChannelImage.create(np.array(np.transpose(aug["image"],(2,0,1)),dtype=np.float32)), PILMask.create(aug["mask"])
 class SegmentationAlbumentationsHorizontalFlip(ItemTransform):
-    def __init__(self,split_idx): self.aug = albumentations.HorizontalFlip(p=0.5)
+    def __init__(self,split_idx): self.aug = albumentations.HorizontalFlip(p=0.05)
     def encodes(self, x):
         img,mask = x
         img= np.transpose(img,(1,2,0))
@@ -255,7 +255,7 @@ class SegmentationAlbumentationsHorizontalFlip(ItemTransform):
 class SegmentationAlbumentationsTransformGaussNoise(ItemTransform):
     def __init__(self,split_idx):
         ItemTransform.__init__(self,split_idx=split_idx)
-        self.aug = albumentations.GaussNoise(p=0.5)
+        self.aug = albumentations.GaussNoise(p=0.05)
     def encodes(self, x):
     
         img,mask = x
@@ -277,7 +277,7 @@ class SegmentationAlbumentationsTransformGaussNoise(ItemTransform):
 class SegmentationAlbumentationsTransformTRanspose(ItemTransform):
     def __init__(self,split_idx):
         ItemTransform.__init__(self,split_idx=split_idx)
-        self.aug = albumentations.Transpose(p=0.5)
+        self.aug = albumentations.Transpose(p=0.05)
     def encodes(self, x):
 
         img,mask = x
@@ -299,7 +299,7 @@ class SegmentationAlbumentationsTransformTRanspose(ItemTransform):
 class SegmentationAlbumentationsTransformBrightness(ItemTransform):
     def __init__(self,split_idx):
         ItemTransform.__init__(self,split_idx=split_idx)
-        self.aug = albumentations.RandomBrightness(p=0.5)
+        self.aug = albumentations.RandomBrightness(p=0.05)
     def encodes(self, x):
         img,mask = x
         #check_for_nan_in_tensor(img,"before brigntes")
@@ -357,7 +357,7 @@ class SegmentationAlbumentationsTransformSHADOW(ItemTransform):
     """
     def __init__(self,split_idx):
         ItemTransform.__init__(self,split_idx=split_idx)
-        self.aug = albumentations.RandomShadow(p=0.5)
+        self.aug = albumentations.RandomShadow(p=0.05)
     def encodes(self, x):
         img,mask = x
         #albumetations asume the order of the channels is h,w,channels but the tensors are channels,h,w
@@ -396,7 +396,7 @@ class SegmentationAlbumentationsTransformSHADOW(ItemTransform):
         
         
 class SegmentationAlbumentationsChannelCorruption(ItemTransform):
-    def __init__(self, corruptible_channels, p_rotate=0.5, p_flip=0.5, split_idx=0, order=100):
+    def __init__(self, corruptible_channels, p_rotate=0.1, p_flip=0.1, split_idx=0, order=100):
         """
         corruptible_channels: list of channels that can be corrupted
         p_rotate: probability of applying a random 90-degree rotation
@@ -434,7 +434,7 @@ class SegmentationAlbumentationsChannelCorruption(ItemTransform):
 class SegmentationAlbumentationsTransformSHIFTSCALEROTATE(ItemTransform):
     def __init__(self,split_idx):
         ItemTransform.__init__(self,split_idx=split_idx)
-        self.aug = ShiftScaleRotate(p=0.5)
+        self.aug = ShiftScaleRotate(p=0.05)
     def encodes(self, x):
         if len(x)==2:
             #the transform should be done on both image and label
