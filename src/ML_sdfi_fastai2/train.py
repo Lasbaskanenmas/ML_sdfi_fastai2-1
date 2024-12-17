@@ -44,9 +44,31 @@ import shutil
 import utils.utils as sdfi_utils
 from wwf.vision.timm import *
 from fastai.vision.all import GradientAccumulation
-print("TEMPRYRARY DDEACTIVATING SSL CHECK ON DELPHI")
-import ssl
-ssl._create_default_https_context = ssl._create_unverified_context
+#print("TEMPRYRARY DDEACTIVATING SSL CHECK ON DELPHI")
+#import ssl
+#ssl._create_default_https_context = ssl._create_unverified_context
+
+from fastai.callback.core import Callback
+
+from fastai.learner import Callback, CancelBatchException, CancelEpochException
+class CSVLoggerWithLR(CSVLogger):
+    def after_epoch(self):
+        # Get the current learning rates from the optimizer
+        current_lrs = [group['lr'] for group in self.learn.opt.param_groups]
+
+        # Extend the log with learning rates
+        log_values = self.learn.recorder.log + current_lrs
+
+        # Ensure the header includes learning rate columns
+        if not hasattr(self, 'header_written') or not self.header_written:
+            lr_headers = [f'lr_{i}' for i in range(len(current_lrs))]
+            self.file.write(','.join(self.learn.recorder.metric_names + lr_headers) + '\n')
+            self.header_written = True
+
+        # Write the log values to the CSV file
+        self.file.write(','.join(map(str, log_values)) + '\n')
+        self.file.flush()
+
 
 
 def make_deterministic():
@@ -68,28 +90,6 @@ def make_deterministic():
     torch.backends.cudnn.benchmark = False
 
 
-#depricated since we now can use start_epochs argumetn to fit_one_cykle
-'''
-class SkipToEpoch(Callback):
-    """
-    fastai2 does not support the start_epoch functionality that existed in fastai1. 
-    this class is taken from the link below and meant to  repliate the functionality of start_epoch argument
-    
-    https://forums.fast.ai/t/resuming-fit-one-cycle-with-model-from-savemodelcallback/72268
-    use like this 
-    learn.fit_one_cycle(1,3e-3, cbs=cbs+SkipToEpoch(start_epoch))
-
-
-    """
-    order = ProgressCallback.order + 1
-    def __init__(self, start_epoch:int):
-        self._skip_to = start_epoch
-
-    def before_epoch(self):
-        if self.epoch < self._skip_to:
-            raise CancelEpochException
-
-'''
 class DoThingsAfterBatch(Callback):
     """
     Save model after n batch
@@ -195,6 +195,7 @@ class basic_traininFastai2:
             start_epoch=self.experiment_settings_dict["last_epoch"]+1
         else:
             start_epoch =0
+
 
         if self.experiment_settings_dict["sceduler"] =="fit_one_cycle":
             self.learn.fit_one_cycle(n_epoch=self.experiment_settings_dict["epochs"],start_epoch=start_epoch, lr_max=lr_max,
@@ -304,6 +305,7 @@ def train(experiment_settings_dict):
 
     print("loading the dataset..")
     dls = sdfi_dataset.get_dataset(experiment_settings_dict)
+
 
     print("setting up a unet training..")
     training= basic_traininFastai2(experiment_settings_dict,dls)

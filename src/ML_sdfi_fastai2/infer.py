@@ -15,9 +15,11 @@ import torch
 import sys
 from torch.multiprocessing import Process, Queue
 from fastai.vision.all import *
+
+#OBS! for some reasone spawn is nececeary during inference but not alowed during training!
 #torch.multiprocessing.set_start_method('spawn') # otherwise we get : Error	"Cannot re-initialize CUDA in forked subprocess. To use CUDA with multiprocessing, you must use the 'spawn' start method"
 #if not torch.multiprocessing.get_start_method(allow_none=True):
-    #this is nly alowed to be set once. and the if statement above makes sure its only set once
+#    #this is nly alowed to be set once. and the if statement above makes sure its only set once
 #    torch.multiprocessing.set_start_method('spawn') # otherwise we get : Error      "Cannot re-initialize CUDA in forked subprocess. To use CUDA with multiprocessing, you must use the 'spa>
 
 
@@ -211,6 +213,7 @@ def infer_with_get_preds_on_all(training,files):
     dl = training.learn.dls.test_dl(files)
     #no gradients should be computed during inference!
     with torch.no_grad():
+        training.learn.model.eval() #this should not be nececeary but maybe it isnt activated when using a custom backbone?
         training.learn.validate(dl=dl)
     #training.learn.get_preds(dl=dl,with_input=with_input)
 

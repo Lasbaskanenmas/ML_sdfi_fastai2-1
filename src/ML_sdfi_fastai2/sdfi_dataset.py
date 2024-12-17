@@ -541,7 +541,13 @@ def get_dataset(experiment_settings_dict):
     #camvid.summary(source=Path(experiment_settings_dict["path_to_dataset"]) / "images")
 
     #Setting number of workers > 0 should speed up training if data is stored on slow medium lika NAS or HDD, to get this to work on windows is however tricky,se https://github.com/pytorch/pytorch/issues/16943
-    dls = a_dataset.dataloaders(Path(experiment_settings_dict["path_to_images"]) , bs=experiment_settings_dict["batch_size"], num_workers=int(experiment_settings_dict["num_workers"]))
+    if experiment_settings_dict["pin_memory"]:
+        print("using pin_memory ########################################################################")
+    else:
+        print("not using pin_memory #####################################################################")
+    print("experiment_settings_dict['prefetch_factor']: "+str(experiment_settings_dict["prefetch_factor"]))
+
+    dls = a_dataset.dataloaders(Path(experiment_settings_dict["path_to_images"]) , bs=experiment_settings_dict["batch_size"], num_workers=int(experiment_settings_dict["num_workers"]) ,pin_memory = experiment_settings_dict["pin_memory"],prefetch_factor = int(experiment_settings_dict["prefetch_factor"]))
 
 
     #if we use cropping as augmetnation for training we might want to reduce the batchsize during validation to make sure we dont use to much memory
