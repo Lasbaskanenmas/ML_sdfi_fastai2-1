@@ -273,7 +273,8 @@ class basic_traininFastai2:
                              model_dir=self.experiment_settings_dict["model_folder"] ,n_in=len(experiment_settings_dict["means"]))#callback_fns=[partial(CSVLogger, filename= experiment_settings_dict["job_name"], append=True)])
         else:
             # fastai asumes 'model_dir' to be a path that is relative to 'path'. In order to make model_dir independent of 'path' we need to make the model_dir path absolute with 'resolve()' first.
-            learn = unet_learner(dls, self.experiment_settings_dict["model"], loss_func=a_loss_func,metrics=valid_accuracy, wd=1e-2,
+#I change the epsilon parameter from e-8 to e-6 becasu this is recomended as a way to avoid nan that arize late in learningare scheduler when using halfprecuision! (https://discuss.pytorch.org/t/nan-after-50-epochs/75835/4) 
+            learn = unet_learner(dls, self.experiment_settings_dict["model"], loss_func=a_loss_func,metrics=valid_accuracy, wd=1e-2,opt_func=partial(Adam, eps=2e-3), 
                              path= self.experiment_settings_dict["log_folder"],
                              model_dir=self.experiment_settings_dict["model_folder"] ,n_in=len(experiment_settings_dict["means"]))#callback_fns=[partial(CSVLogger, filename= experiment_settings_dict["job_name"], append=True)])
         if self.experiment_settings_dict["to_fp16"]:
