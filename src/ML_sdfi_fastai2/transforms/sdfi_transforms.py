@@ -142,6 +142,8 @@ def get_transforms(experiment_settings_dict):
                 #order=100 apply after all other transforms 
                 #Normalize.from_stats has order 99 so 100 will cause the channel coruption to be aplied after the normalizations
                 transforms.append(SegmentationAlbumentationsChannelCorruption(corruptible_channels=experiment_settings_dict["channel_coruption"], p_rotate=0.025, p_flip=0.025, split_idx=0, order=100))
+        elif "colorJitter" == transform_name:
+                transforms.append(ColorJitter(split_idx=0))
         else:
             input(" no transform with name :"+str(transform_name))
     return transforms
@@ -337,6 +339,32 @@ class SegmentationAlbumentationsTransformBrightness(ItemTransform):
             #return aug["image"], PILMask.create(aug["mask"])
             return np.transpose(aug["image"],(2,0,1)), PILMask.create(aug["mask"])
          """
+
+class ColorJitter(ItemTransform):
+    """
+    A class for gently changing the color : (you can experimetn with the setting shere : https://kornia.readthedocs.io/en/stable/augmentation.html)
+    """
+    def __init__(self,split_idx):
+        ItemTransform.__init__(self,split_idx=split_idx)
+        self.aug = albumentations.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.05, p=0.1)
+    def encodes(self, x):
+        img,mask = x
+        #check_for_nan_in_tensor(img,"before brigntes")
+        #albumetations asume the order of the channels is h,w,channels but the tensors are channels,h,w
+        img= np.transpose(img,(1,2,0))
+        img=np.array(img,dtype=np.uint8).astype(np.uint8).copy()
+        augmented_rgb = self.aug(image=img[:,:,:3])['image']
+        extra_channels = image[:, :, 3:]  # Fourth channel (e.g., Alpha or NIR)
+        # Reattach the extra channels
+        augmented_image = np.concatenate([augmented_rgb, extra_channels], axis=2)
+        #check_for_nan_in_numpy_array(aug["image"],"after brighntes")
+        #if the transformation introduced nan in the data, use the original data instead
+        #if np.isnan(aug["image"]).any():
+        #            return x
+        #after transfomr is donw we need to transpose the tensor back to channels,h,w
+        #check_for_nan_in_numpy_array(aug["image"],"after aug data")
+        #check_for_nan_in_numpy_array(np.array(mask),"after GaussNoise target")
+        return ImageBlockReplacement.MultiChannelImage.create(np.array(np.transpose(augmented_image,(2,0,1)),dtype=np.float32)), PILMask.create(aug["mask"])
             
 class SegmentationAlbumentationsTransformSHADOW(ItemTransform):
     """
