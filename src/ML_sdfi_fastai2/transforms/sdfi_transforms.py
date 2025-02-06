@@ -342,11 +342,12 @@ class SegmentationAlbumentationsTransformBrightness(ItemTransform):
 
 class ColorJitter(ItemTransform):
     """
-    A class for gently changing the color : (you can experimetn with the setting shere : https://kornia.readthedocs.io/en/stable/augmentation.html)
+    A class for gently changing the color : (you can experimetn with the settings here :https://explore.albumentations.ai/transform/ColorJitter (or an alternative here https://kornia.readthedocs.io/en/stable/augmentation.html) )
+    TODO: also adjust the other channels (now only adjusts the 3 first channels)
     """
     def __init__(self,split_idx):
         ItemTransform.__init__(self,split_idx=split_idx)
-        self.aug = albumentations.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.05, p=1.0)
+        self.aug = albumentations.ColorJitter(brightness=[0.8,1.2], contrast=[0.8,1.2], saturation=[0.8,1.2], hue=[-0.2,0.2], p=0.2)
     def encodes(self, x):
         img,mask = x
         #check_for_nan_in_tensor(img,"before brigntes")
