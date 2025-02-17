@@ -144,6 +144,9 @@ def get_transforms(experiment_settings_dict):
                 transforms.append(SegmentationAlbumentationsChannelCorruption(corruptible_channels=experiment_settings_dict["channel_coruption"], p_rotate=0.025, p_flip=0.025, split_idx=0, order=100))
         elif "colorJitter" == transform_name:
                 transforms.append(ColorJitter(split_idx=0))
+        elif "downsize" == transform_name:
+                #split_idx=None --> apply for both training and validation
+                transforms.append(SegmentationAlbumentationsResize(split_idx=None,max_size = experiment_settings_dict["max_size"]))
         else:
             input(" no transform with name :"+str(transform_name))
     return transforms
@@ -224,6 +227,17 @@ class SegmentationAlbumentationsCentreCrop(ItemTransform):
         aug = self.aug(image=img, mask=np.array(mask))
         return ImageBlockReplacement.MultiChannelImage.create(np.array(np.transpose(aug["image"],(2,0,1)),dtype=np.float32)), PILMask.create(aug["mask"])
 
+class SegmentationAlbumentationsResize(ItemTransform):
+    def __init__(self,max_size,split_idx):
+        ItemTransform.__init__(self,split_idx=split_idx, order=-1)
+        #p1 and allways_apply both make the transform allways happen (if split_idx has the correct value )
+        self.aug =albumentations.LongestMaxSize(max_size=max_size,p=1,always_apply=True)
+    def encodes(self, x):
+        img,mask = x
+        img= np.transpose(img,(1,2,0))
+        img=np.array(img,dtype=np.uint8).astype(np.uint8).copy()
+        aug = self.aug(image=img, mask=np.array(mask))
+        return ImageBlockReplacement.MultiChannelImage.create(np.array(np.transpose(aug["image"],(2,0,1)),dtype=np.float32)), PILMask.create(aug["mask"])
 
 class SegmentationAlbumentationsVerticalFlip(ItemTransform):
     def __init__(self,split_idx):
