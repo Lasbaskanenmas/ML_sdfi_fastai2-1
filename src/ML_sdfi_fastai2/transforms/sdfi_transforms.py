@@ -233,11 +233,21 @@ class SegmentationAlbumentationsResize(ItemTransform):
         #p1 and allways_apply both make the transform allways happen (if split_idx has the correct value )
         self.aug =albumentations.LongestMaxSize(max_size=max_size,p=1,always_apply=True)
     def encodes(self, x):
-        img,mask = x
-        img= np.transpose(img,(1,2,0))
-        img=np.array(img,dtype=np.uint8).astype(np.uint8).copy()
-        aug = self.aug(image=img, mask=np.array(mask))
-        return ImageBlockReplacement.MultiChannelImage.create(np.array(np.transpose(aug["image"],(2,0,1)),dtype=np.float32)), PILMask.create(aug["mask"])
+        # Check if the input is a tuple (img, mask)
+        if len(x)==2:
+            img,mask = x
+            img= np.transpose(img,(1,2,0))
+            img=np.array(img,dtype=np.uint8).astype(np.uint8).copy()
+            aug = self.aug(image=img, mask=np.array(mask))
+            return ImageBlockReplacement.MultiChannelImage.create(np.array(np.transpose(aug["image"],(2,0,1)),dtype=np.float32)), PILMask.create(aug["mask"])
+        else:
+            assert len(x) ==1
+
+            img= x[0]
+            img= np.transpose(img,(1,2,0))
+            img=np.array(img,dtype=np.uint8).astype(np.uint8).copy()
+            aug = self.aug(image=img)
+            return [ImageBlockReplacement.MultiChannelImage.create(np.array(np.transpose(aug["image"],(2,0,1)),dtype=np.float32))]
 
 class SegmentationAlbumentationsVerticalFlip(ItemTransform):
     def __init__(self,split_idx):
