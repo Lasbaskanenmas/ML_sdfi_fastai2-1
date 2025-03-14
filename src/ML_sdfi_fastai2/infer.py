@@ -36,13 +36,13 @@ class SaveSegmentationOutput(Callback):
         self.start_time = time.time()
 
 
-    def after_pred(self):
+    def after_pred(self,verbose=False):
         #print("room left in queue: "+str(self.data_to_save_queue.maxsize - self.data_to_save_queue.qsize()))
         call_back_start = time.time()
         #print("CALLBACK IS RUNNING!")
-        print("self.learn.n_iter:"+str(self.learn.n_iter))
-        print("self.learn.iter:"+str(self.learn.iter))
-        print("Time per image for inference: "+str((time.time()-self.start_time )/((self.learn.iter+1)*self.experiment_settings_dict["batch_size"])))
+        if verbose:print("self.learn.n_iter:"+str(self.learn.n_iter))
+        if verbose:print("self.learn.iter:"+str(self.learn.iter))
+        if verbose:print("Time per image for inference: "+str((time.time()-self.start_time )/((self.learn.iter+1)*self.experiment_settings_dict["batch_size"])))
 
 
 
@@ -94,7 +94,7 @@ class SaveSegmentationOutput(Callback):
             '''
 
             #save_probabilities_as_uint8_no_queue(probs=probs, path_to_probabilities= str(self.save_path / f"{file_stem}_callback_prob.png"),new_meta=new_meta)
-        print("callback took: "+str(time.time() - call_back_start))
+        if verbose:print("callback took: "+str(time.time() - call_back_start))
 
 def save_probabilities_as_float32(probs,path_to_probabilities,new_meta):
     """
@@ -124,7 +124,7 @@ def save_probabilities_as_uint8_no_queue(probs,path_to_probabilities,new_meta):
     with rasterio.open(path_to_probabilities, "w", **new_meta) as dest:
         dest.write(np.array((probs*255),dtype=np.uint8))
 
-def save_probabilities_as_uint8(queue):
+def save_probabilities_as_uint8(queue,verbose= False):
     #(probs,path_to_probabilities,new_meta):
     """
     Probabilities can be saved in uint8 format in order to save space and memory usage
@@ -135,7 +135,7 @@ def save_probabilities_as_uint8(queue):
             data_from_queue = queue.get()
             #print("recived data:"+str(data_from_queue))
             if data_from_queue is None:
-                print("totall time spent saving:"+str(totall_time_spent_saving))
+                if verbose:print("totall time spent saving:"+str(totall_time_spent_saving))
                 break  # End the loop when None is received
             saving_data_start_time = time.time()
             (probs,input_data_path ,path_to_probabilities,experiment_settings_dict) = data_from_queue
@@ -186,7 +186,7 @@ def save_probabilities_as_uint8(queue):
                 with rasterio.open(path_to_probabilities, "w", **new_meta) as dest:
                     dest.write(np.array((probs *255),dtype=np.uint8))
                 took=time.time()-saving_data_start_time
-                print("saving a single image to disk in the separatte thread took: "+str(took))
+                if verbose:print("saving a single image to disk in the separatte thread took: "+str(took))
                 totall_time_spent_saving+=took
             elif experiment_settings_dict["save_preds"]:
                 preds = np.array(probs.argmax(axis=0),dtype=np.uint8) # since this is a numpy array and not a pytorch array . we now need to use axis=0 instead of dim=0
@@ -195,7 +195,7 @@ def save_probabilities_as_uint8(queue):
                 with rasterio.open(path_to_probabilities, "w", **new_meta) as dest:
                     dest.write(np.expand_dims(preds,axis=0))
                 took=time.time()-saving_data_start_time
-                print("saving a single image to disk in the separatte thread took: "+str(took))
+                if verbose:print("saving a single image to disk in the separatte thread took: "+str(took))
                 totall_time_spent_saving+=took
 
 
