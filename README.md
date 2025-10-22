@@ -28,19 +28,19 @@ pip3 install torch torchvision torchaudio --index-url https://download.pytorch.o
 configs/example_configs/train_example_dataset.ini holds parameters for training a model on a dataset
 ### Use it like this
 ```sh
-python train.py --config configs/example_configs/train_example_dataset.ini
+python src/ML_sdfi_fastai2/train.py --config configs/example_configs/train_example_dataset.ini
 ```
 ## infer.py
 configs/example_configs/infer_example_dataset.ini holds parameters for doing inference on a dataset
 ### Use it like this
 ```sh
-python infer.py --config configs/example_configs/example_infer.ini
+python src/ML_sdfi_fastai2/infer.py --config configs/example_configs/infer_example_dataset.ini
 ```
 ## report.py
 configs/example_configs/report_example_dataset.ini holds parameters for creating a report based on images, label-images and prediction-images
 ### Use it like this
 ```sh
-python report.py --config configs/example_configs/report_example_dataset.ini
+python src/ML_sdfi_fastai2/report.py --config configs/example_configs/report_example_dataset.ini
 ```
 
 All example config files work with the example dataset that comes with the github https://github.com/SDFIdk/multi_channel_dataset_creation.git

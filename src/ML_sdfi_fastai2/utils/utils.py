@@ -56,6 +56,7 @@ def load_settings_from_config_file(config_file_path):
         else:
             print("loading settings in the : "+str(section)+" section")
             for key in parser[section]:
+                print("loading value for : "+str(key))
                 value_for_key = parser[section][key]
 
                 if key == "model":
