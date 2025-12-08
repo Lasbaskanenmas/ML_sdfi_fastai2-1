@@ -1,6 +1,6 @@
 # SDFI_ml
 
-Machine learning framework developed and maintained by **SDFI** for performing **semantic segmentation** on **multichannel images**.
+Machine learning framework developed and maintained by **KDS** for performing **semantic segmentation** on **multichannel images**.
 
 ---
 
@@ -89,4 +89,5 @@ epoch,train_loss,valid_loss,valid_accuracy,time,lr_0,lr_1,lr_2
 
 All example configuration files are compatible with the example dataset available at:  
 👉 [https://github.com/SDFIdk/multi_channel_dataset_creation](https://github.com/SDFIdk/multi_channel_dataset_creation)
+
 
