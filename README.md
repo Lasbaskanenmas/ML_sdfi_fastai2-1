@@ -15,7 +15,6 @@ pip install -e .
 ### Verify CUDA Support
 
 ```sh
-mamba activate ML_sdfi
 python
 >>> import torch
 >>> torch.cuda.is_available()
@@ -64,8 +63,24 @@ Configuration file:
 
 Run:
 ```sh
+In order to analyse how well the model does on a dataset we can create a .pdf report with loss plots , confusion matrixes and example iamges and predictions
+
+cd ../multi_channel_dataset_creation
 python src/multi_channel_dataset_creation/geopackage_to_label_v2.py --geopackage example_dataset/labels/example_dataset_buildings.gpkg --input_folder example_dataset/data/splitted/rgb/ --output_folder example_dataset/buildings/splitted_buildings/ --background_value 0 --value_used_for_all_polygons 1
+cd ../ML_sdfi_fastai2
 python src/ML_sdfi_fastai2/report.py --config configs/example_configs/report_example_dataset.ini
+
+If you get confusing errors when creating report it is ofern casued by a faulty .csv file 
+check ../logs_and_models/example_dataset_iter_1/iter_1/logs/iter_1.csv 
+This file should look like this
+
+epoch,train_loss,valid_loss,valid_accuracy,time,lr_0,lr_1,lr_2
+0,2.671426296234131,2.261967182159424,0.15685869753360748,00:07,8e-05,8e-05,8e-05
+1,2.4981231689453125,1.2677741050720215,0.6439558863639832,00:06
+...
+...
+9,3.6438961029052734,1.2790676355361938,0.6442530751228333,00:06,8.64737438191444e-05,8.64737438191444e-05,8.64737438191444e-05
+
 ```
 
 ---

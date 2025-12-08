@@ -1,23 +1,24 @@
-name: ML_sdfi_tmptest
+name: activate ML_sdfi
 channels:
-  - pytorch-nightly
-  - nvidia
-  - conda-forge
   - fastai
   - pytorch
+  - nvidia
+  - conda-forge
 dependencies:
-  - python=3.9
-  - gdal
-  - pillow
-  - pandas
+  - python=3.10
   - fastai
-  - reportlab
+  - pytorch
+  - geopandas
+  - gdal
+  - fiona
   - psutil
   - rasterio
-  - torchvision==0.17.1
-  - pytorch==2.2.1
+  - torchvision
   - pytorch-cuda=12.1
   - pip
   - pip:
       - git+https://github.com/rasmuspjohansson/albumentations-multi-channels
       - git+https://github.com/walkwithfastai/walkwithfastai.github.io
+      - git+https://github.com/SDFIdk/multi_channel_dataset_creation.git
+      - psycopg2-binary
+      - reportlab
