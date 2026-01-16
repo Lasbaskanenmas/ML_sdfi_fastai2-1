@@ -1,4 +1,4 @@
-name: activate ML_sdfi
+name: ML_sdfi
 channels:
   - fastai
   - pytorch
