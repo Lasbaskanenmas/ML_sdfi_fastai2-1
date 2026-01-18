@@ -68,6 +68,8 @@ def load_settings_from_config_file(config_file_path):
                 elif section in ["FOLDERS","DATASET"]:
                     settings_dictionary[key] = Path(value_for_key)
                 else:
+                    print("key:"+str(key))
+                    print("value_for_key:"+str(value_for_key))
                     settings_dictionary[key] = json.loads(str(value_for_key))
 
     print("######################################### FINNISHED PARSING THE SETTINGS FILE#################################################")

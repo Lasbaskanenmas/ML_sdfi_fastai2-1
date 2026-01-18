@@ -14,30 +14,36 @@ import analyse.rapport as rapport
 
 	
 def main(experiment_settings_dict):
-	"""
-	:param experiment_settings_dict:
-	:return: None
-	Creates csv_file with performance of model on dataset
-	creating csv files with prediction statistics for the different subsets (land , forstad ,bykerne)
-	Also creates pkl and pdf 's with average images
-	"""
-	print(experiment_settings_dict)
-	#ad an entry in the dictionary for what csv file name we should store/read error rates iou etc for each image
-	test_set= experiment_settings_dict["dataset_folder"].parent.name  #the name of the dataset e.g 'AmagerLangeland1000p160mmRTO' or CAMVID_TESTIMAGES
+    """
+    :param experiment_settings_dict:
+    :return: None
+    Creates csv_file with performance of model on dataset    
+    creating csv files with prediction statistics for the different subsets (land , forstad ,bykerne)
+    Also creates pkl and pdf 's with average images
+    """
+    print(experiment_settings_dict)
+    #ad an entry in the dictionary for what csv file name we should store/read error rates iou etc for each image
+    try:
+        test_set= experiment_settings_dict["dataset_folder"].parent.name  #the name of the dataset e.g 'AmagerLangeland1000p160mmRTO' or CAMVID_TESTIMAGES
+    except:
+        test_set= experiment_settings_dict["path_to_dataset"].parent.name  #the name of the dataset e.g 'AmagerLangeland1000p160mmRTO' or CAMVID_TESTIMAGES
 
-	#This csv path became to long when generating it automatically formtrasiningexperiment name and dataset name
-	#Easy solution is to load the path from ino file instead
-	#experiment_settings_dict["model_performance_on_each_image_csv"] =str(experiment_settings_dict["log_file"]).replace(".csv","model_on_dataset_"+test_set+".csv")
+
+
+
+    #This csv path became to long when generating it automatically formtrasiningexperiment name and dataset name
+    #Easy solution is to load the path from ino file instead
+    #experiment_settings_dict["model_performance_on_each_image_csv"] =str(experiment_settings_dict["log_file"]).replace(".csv","model_on_dataset_"+test_set+".csv")
 	
-	if experiment_settings_dict["make_csv"]:
-		print("creating csv file with info about how predictions compare to labels")
-		# produce csv fil
-		make_prediction_csv.create_csv_with_prediction_info(experiment_settings_dict)
-	print("###################################")
-	print("creating csv files with prediction statistics for the different subsets (land , forstad ,bykerne) ")
-	print("creating pdf files with visualisations of the predictions on the dataset : " + str(experiment_settings_dict["dataset_folder"]))
-	if experiment_settings_dict["create_subset_files"]:
-		rapport.main(experiment_settings_dict)
+    if experiment_settings_dict["make_csv"]:
+        print("creating csv file with info about how predictions compare to labels")
+        # produce csv fil
+        make_prediction_csv.create_csv_with_prediction_info(experiment_settings_dict)
+        print("###################################")
+        print("creating csv files with prediction statistics for the different subsets (land , forstad ,bykerne) ")
+        print("creating pdf files with visualisations of the predictions on the dataset : " + str(experiment_settings_dict["dataset_folder"]))
+    if experiment_settings_dict["create_subset_files"]:
+        rapport.main(experiment_settings_dict)
 
 
 # rapport.main(modelfile, test_set, subsets, test_set_dir, predictions_dir, test_lb_dir)
