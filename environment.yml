@@ -14,7 +14,7 @@ dependencies:
   - psutil
   - rasterio
   - torchvision
-  - pytorch-cuda=12.1
+ # - pytorch-cuda=12.1
   - pip
   - pip:
       - git+https://github.com/rasmuspjohansson/albumentations-multi-channels
