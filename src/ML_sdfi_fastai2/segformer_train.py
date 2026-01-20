@@ -61,8 +61,8 @@ def make_deterministic():
     random.seed(0)
     np.random.seed(0)
     torch.manual_seed(0)
-    torch.cuda.manual_seed(0)
-    torch.cuda.manual_seed_all(0)
+    torch.mps.manual_seed(0)  # changed
+    torch.mps.manual_seed(0)  # changed
 
     # Set PyTorch to use deterministic algorithms
     torch.backends.cudnn.deterministic = True
@@ -387,7 +387,7 @@ class basic_traininFastai2:
         #https://docs.fast.ai/losses.html#CrossEntropyLossFlat
 
         if "class_weights" in experiment_settings_dict and experiment_settings_dict["class_weights"]:
-            weights = torch.tensor(experiment_settings_dict["class_weights"]).cuda()
+            weights = torch.tensor(experiment_settings_dict["class_weights"]).to("mps")  # changed
             print("Using class weights: {}".format(experiment_settings_dict["class_weights"]))
             a_loss_func= CrossEntropyLossFlat(axis=1,ignore_index=ignore_index,weight=weights) 
         else:
