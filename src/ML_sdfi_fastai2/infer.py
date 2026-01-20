@@ -319,9 +319,9 @@ def infer_all(experiment_settings_dict,benchmark_folder,output_folder,show,all_t
     training.learn.add_cb(save_callback)
 
 
-    # Move the model to the GPU if available
-    if torch.cuda.is_available():
-        training.learn.model.cuda()
+    # Move the model to the MPS device if available
+    if torch.backends.mps.is_available():  # changed
+        training.learn.model.to("mps")  # changed
 
     #make sure outputfolder exists
     os.makedirs(output_folder, exist_ok=True)
@@ -506,12 +506,10 @@ def main(config):
 
 
 
-    # Check if CUDA is available
+    # Check if MPS is available
     print("##########################################")
-    if torch.cuda.is_available():
-        # Get the name of the current GPU device
-        device_name = torch.cuda.get_device_name(torch.cuda.current_device())
-        print(f"PyTorch is using GPU: {device_name}")
+    if torch.backends.mps.is_available():  # changed
+        print("PyTorch is using MPS")  # changed
     else:
         print("PyTorch is using CPU")
     print("##########################################")

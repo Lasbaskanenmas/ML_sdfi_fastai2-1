@@ -543,7 +543,7 @@ def set_seed(dls,x=42): #must have dls, as it has an internal random.Random
         torch.manual_seed(x)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
-        if torch.cuda.is_available(): torch.cuda.manual_seed_all(x)        
+        if torch.backends.mps.is_available(): torch.mps.manual_seed(x)  # changed
 
 def visualize_transforms(experiment_settings_dict,image,save_images):
 
