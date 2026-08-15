@@ -152,9 +152,15 @@ class SegFormerWrapper(nn.Module):
     
     def _adapt_input_channels(self, n_in):
         """Adapt the first convolution to accept n_in channels instead of 3"""
-        # SegFormer's first layer is in the patch embedding
-        old_conv = self.model.segformer.encoder.patch_embeddings[0].proj
-        
+        # SegFormer's first layer is in the patch embedding. Its attribute path changed in
+        # transformers 5.x (encoder.patch_embeddings[0] -> stages[0].patch_embeddings), so pick
+        # the path based on which layout the installed transformers version exposes.
+        segformer = self.model.segformer
+        if hasattr(segformer, "encoder"):
+            old_conv = segformer.encoder.patch_embeddings[0].proj   # transformers <= 4.x
+        else:
+            old_conv = segformer.stages[0].patch_embeddings.proj    # transformers >= 5.x
+
         # Create new conv with n_in channels
         new_conv = nn.Conv2d(
             n_in, 
@@ -175,8 +181,11 @@ class SegFormerWrapper(nn.Module):
             with torch.no_grad():
                 new_conv.weight[:, :3] = old_conv.weight
         
-        # Replace the conv layer
-        self.model.segformer.encoder.patch_embeddings[0].proj = new_conv
+        # Replace the conv layer (same version-tolerant path as the GET above)
+        if hasattr(segformer, "encoder"):
+            segformer.encoder.patch_embeddings[0].proj = new_conv   # transformers <= 4.x
+        else:
+            segformer.stages[0].patch_embeddings.proj = new_conv    # transformers >= 5.x
     
     def forward(self, x):
         # SegFormer expects input in NCHW format and returns logits
@@ -327,6 +336,23 @@ class basic_traininFastai2:
         else:
             start_epoch =0
 
+        # Optional Weights & Biases tracking (opt-in via `use_wandb` config flag).
+        # Imported lazily so wandb stays an optional dependency for non-tracked runs.
+        use_wandb = self.experiment_settings_dict.get("use_wandb", False)
+        if use_wandb:
+            import wandb
+            from fastai.callback.wandb import WandbCallback
+            # Load WANDB_API_KEY (and any optional WANDB_* overrides) from the repo-root .env
+            # so wandb.init() can authenticate without requiring `wandb login` to have been run.
+            import pathlib
+            from dotenv import load_dotenv
+            load_dotenv(dotenv_path=pathlib.Path(__file__).resolve().parents[2] / '.env')
+            wandb.init(project=self.experiment_settings_dict.get("wandb_project", "sdfi-segmentation"),
+                       name=self.experiment_settings_dict["job_name"],
+                       config={k: str(v) for k, v in self.experiment_settings_dict.items()},
+                       dir=str(self.experiment_settings_dict["log_folder"]))
+            self.learn.add_cb(WandbCallback(log_preds=False))
+
 
         if self.experiment_settings_dict["sceduler"] =="fit_one_cycle":
             self.learn.fit_one_cycle(n_epoch=self.experiment_settings_dict["epochs"],start_epoch=start_epoch, lr_max=lr_max,
@@ -347,6 +373,8 @@ class basic_traininFastai2:
 
         print("saving model")
         self.learn.save(self.experiment_settings_dict["job_name"])
+        if use_wandb:
+            wandb.finish()
 
 
 
@@ -386,13 +414,37 @@ class basic_traininFastai2:
         #https://forums.fast.ai/t/loss-function-of-unet-learner-flattenedloss-of-crossentropyloss/51605
         #https://docs.fast.ai/losses.html#CrossEntropyLossFlat
 
-        if "class_weights" in experiment_settings_dict and experiment_settings_dict["class_weights"]:
+        # Loss selection. Kept SYMMETRIC with train.py's BasicTrainingFastai2._loss() so all four
+        # models honor the same `loss_function` + `class_weights` config keys (the comparability
+        # requirement: identical loss across every cell). Previously this trainer ignored
+        # `loss_function` and always built CrossEntropyLossFlat; now it branches the same way
+        # train.py does. The cross_entropy path (what the results runs use) is self-contained and
+        # applies the class weights; the exotic losses are lazy-imported from train.py so there is a
+        # single source of truth (no duplicated loss-class definitions that could drift).
+        # NOTE: as in train.py, focal and dice do NOT take class weights (only cross_entropy and
+        # combined do) -- keep loss_function=cross_entropy when class_weights are meant to apply.
+        loss_type = experiment_settings_dict.get("loss_function", "cross_entropy")
+        weights = None
+        if experiment_settings_dict.get("class_weights"):
             weights = torch.tensor(experiment_settings_dict["class_weights"]).cuda()
-            print("Using class weights: {}".format(experiment_settings_dict["class_weights"]))
-            a_loss_func= CrossEntropyLossFlat(axis=1,ignore_index=ignore_index,weight=weights) 
+            print("Using class weights (loss_function={}): {}".format(
+                loss_type, experiment_settings_dict["class_weights"]))
         else:
-            print("weighting all classes equally!")
-            a_loss_func= CrossEntropyLossFlat(axis=1,ignore_index=ignore_index)
+            print("weighting all classes equally (loss_function={})".format(loss_type))
+
+        if loss_type == "cross_entropy":
+            a_loss_func = CrossEntropyLossFlat(axis=1, ignore_index=ignore_index, weight=weights)
+        elif loss_type == "combined":
+            from train import CombinedLoss
+            a_loss_func = CombinedLoss(ignore_index=ignore_index, class_weights=weights)
+        elif loss_type == "focal":
+            from train import FocalLoss
+            a_loss_func = FocalLoss(ignore_index=ignore_index)
+        elif loss_type == "dice":
+            from train import DiceLoss
+            a_loss_func = DiceLoss(ignore_index=ignore_index)
+        else:
+            sys.exit("unknown loss_function: {}".format(loss_type))
 
         # Check if using SegFormer
         value = self.experiment_settings_dict["model"]
@@ -443,7 +495,7 @@ class basic_traininFastai2:
                 wd=1e-2,
                 path=self.experiment_settings_dict["log_folder"],
                 model_dir=self.experiment_settings_dict["model_folder"],
-                n_in=len(experiment_settings_dict["means"]),
+                n_in=sdfi_utils.n_in_from_settings(experiment_settings_dict),
                 num_classes=num_classes,
                 pretrained=pretrained,
                 ignore_index=ignore_index
@@ -458,15 +510,21 @@ class basic_traininFastai2:
 
             learn = timm_unet_learner(dls, self.experiment_settings_dict["model"], loss_func=a_loss_func,metrics=valid_accuracy,bottleneck=experiment_settings_dict["bottleneck"], wd=1e-2,
                              path= self.experiment_settings_dict["log_folder"],pretrained=pretrained,
-                             model_dir=self.experiment_settings_dict["model_folder"] ,n_in=len(experiment_settings_dict["means"]))#callback_fns=[partial(CSVLogger, filename= experiment_settings_dict["job_name"], append=True)])
+                             model_dir=self.experiment_settings_dict["model_folder"] ,n_in=sdfi_utils.n_in_from_settings(experiment_settings_dict))#callback_fns=[partial(CSVLogger, filename= experiment_settings_dict["job_name"], append=True)])
         else:
             # fastai asumes 'model_dir' to be a path that is relative to 'path'. In order to make model_dir independent of 'path' we need to make the model_dir path absolute with 'resolve()' first.
             learn = unet_learner(dls, self.experiment_settings_dict["model"], loss_func=a_loss_func,metrics=valid_accuracy, wd=1e-2,
                              path= self.experiment_settings_dict["log_folder"],
-                             model_dir=self.experiment_settings_dict["model_folder"] ,n_in=len(experiment_settings_dict["means"]))#callback_fns=[partial(CSVLogger, filename= experiment_settings_dict["job_name"], append=True)])
+                             model_dir=self.experiment_settings_dict["model_folder"] ,n_in=sdfi_utils.n_in_from_settings(experiment_settings_dict))#callback_fns=[partial(CSVLogger, filename= experiment_settings_dict["job_name"], append=True)])
         
-        if self.experiment_settings_dict["to_fp16"]:
-            print("training with mixed precision")
+        # bf16 is opt-in via the optional `to_bf16` key (.get keeps old configs without it working).
+        # Preferred over fp16 on Ampere+ (A100): same ~2x speedup, no loss scaling, more stable.
+        # If both are set, bf16 wins.
+        if self.experiment_settings_dict.get("to_bf16", False):
+            print("training with bf16 mixed precision")
+            return learn.to_bf16()
+        elif self.experiment_settings_dict["to_fp16"]:
+            print("training with fp16 mixed precision")
             return learn.to_fp16()
         else:
             print("not training with mixed precision!!")
@@ -617,6 +675,8 @@ if __name__ == "__main__":
         if args.deterministic:
             experiment_settings_dict["num_workers"]= 1
             make_deterministic()
+        else:
+            sdfi_utils.apply_performance_settings(experiment_settings_dict)
 
         infer_model_and_log_folders(experiment_settings_dict)
         train(experiment_settings_dict=experiment_settings_dict)

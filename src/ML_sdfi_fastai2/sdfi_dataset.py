@@ -17,6 +17,11 @@ import ML_sdfi_fastai2.utils.utils as sdfi_utils
 from fastcore.xtras import Path
 import rasterio
 import albumentations as A
+from functools import partial
+# Limit OpenCV (Albumentations backend) to a single thread per DataLoader worker
+# so cv2 doesn't oversubscribe CPU cores when num_workers > 0.
+import cv2
+cv2.setNumThreads(0)
 from fastai.callback.hook import summary
 from fastai.data.block import DataBlock
 from fastai.data.external import untar_data, URLs
@@ -347,6 +352,55 @@ def get_camvid_dataset(experiment_settings_dict):
     return dls
 
 
+# ---------------------------------------------------------------------------
+# Module-level helpers used by get_dataset(). They live at module scope (rather
+# than as nested closures inside get_dataset()) so that they pickle cleanly when
+# PyTorch DataLoader workers are spawned on Windows. State previously captured
+# via closure is now bound by functools.partial at call sites.
+# ---------------------------------------------------------------------------
+
+def _develop_get_image_files(_source_unused, path_to_all_txt, path_to_images, nr_of_train_images=20):
+    """Dev-mode variant: return only the last `nr_of_train_images` paths from all.txt."""
+    all_files = Path(path_to_all_txt).read_text().split('\n')
+    # Skip blank lines and '#'-commented entries (e.g. tiles disabled due to corrupt data).
+    all_files = [f for f in all_files if f.strip() and not f.lstrip().startswith('#')]
+    return [Path(path_to_images) / Path(a_path) for a_path in all_files[-nr_of_train_images:]]
+
+
+def _sdfe_get_image_files(_source_unused, path_to_all_txt, path_to_images, im_type):
+    """Read all.txt and return Path objects to every image file of the right type."""
+    all_files = Path(path_to_all_txt).read_text().split('\n')
+    # Skip blank lines and '#'-commented entries (e.g. tiles disabled due to corrupt data).
+    all_files = [f for f in all_files if im_type in f and not f.lstrip().startswith('#')]
+    return [Path(path_to_images) / Path(a_path) for a_path in all_files]
+
+
+def _list_splitter_inner(items, valid_items):
+    """Splitter callable: return [train_mask, valid_mask] tensors based on valid_items set."""
+    val_mask = tensor([o.name in valid_items for o in items])
+    return [~val_mask, val_mask]
+
+
+def _label_func(image_pathlib_path, label_folder, label_type):
+    """Open the matching label PNG/TIF for `image_pathlib_path` and return as int32 array."""
+    label_path = Path(label_folder) / f'{image_pathlib_path.stem}{label_type}'
+    return np.array(Image.open(label_path), dtype=np.int32)
+
+
+def _label_plus_building_func(image_pathlib_path, label_folder, path_to_buildings, label_type):
+    """Overlay building mask on label, preserving green-roof pixels. Used when extra_labels == "buildings"."""
+    label = _label_func(image_pathlib_path, label_folder, label_type)
+    building_path = Path(path_to_buildings) / f'{image_pathlib_path.stem}{label_type}'
+    if not building_path.is_file():
+        return label
+    building_label = np.array(Image.open(building_path))
+    green_roof_mask = label == 5
+    building_mask = building_label != 0
+    label[building_mask] = building_label[building_mask]
+    label[green_roof_mask] = 5
+    return label
+
+
 def get_dataset(experiment_settings_dict):
     """
     param: experiment_settings_dict: a dictionary holding all information nececeary to create a dataloader for a specific dataset
@@ -356,136 +410,64 @@ def get_dataset(experiment_settings_dict):
     """
     #path to dataset in wich the 'images' folder is located
     pth= experiment_settings_dict["path_to_dataset"]
-    
+
 
     if str(pth) =="camvid":
         return get_camvid_dataset(experiment_settings_dict)
-    
-    
-    def develop_get_image_files(path,nr_of_train_images=20):
-        """
-        :param path:  NOT USED!
-        :param nr_of_train_images: number of images to train on
-        
-        When developing we one want to train on a smaller portion of the images
-        reads the all.txt file but returns a list with only the first items
-        """
-        all_files = (Path(experiment_settings_dict["path_to_all_txt"])).read_text().split('\n')
-        
-        return [Path(experiment_settings_dict["path_to_images"])/Path(a_path) for a_path in all_files[-nr_of_train_images:]] #get_image_files(path)[0:100] #when developing we only train on 100 of the images
-    def sdfe_get_image_files(path):
-        """
-        param: path NOT USED!
-        param: path NOT USED!
 
-        reads in all.txt and returns a list with the paths to all images
-        """
-        all_files = (Path(experiment_settings_dict["path_to_all_txt"])).read_text().split('\n')
-        #make sure that all files are of correct type
-
-        im_type= experiment_settings_dict["im_type"]
-
-        all_files=[im_file for im_file in all_files if im_type in im_file]
-        return [Path(experiment_settings_dict["path_to_images"])/Path(a_path) for a_path in all_files]
-
+    # get_items: read all.txt and return paths to every (eligible) image.
+    # Bound via functools.partial so the resulting callable picks up `path_to_all_txt`,
+    # `path_to_images`, etc. without relying on a closure (which would break Windows spawn).
     if experiment_settings_dict["dev_mode"]:
-        sdfe_get_images = develop_get_image_files
+        sdfe_get_images = partial(_develop_get_image_files,
+                                  path_to_all_txt=experiment_settings_dict["path_to_all_txt"],
+                                  path_to_images=experiment_settings_dict["path_to_images"])
         #when in dev mode we use a subset of the reduced trainingset for validation
-        valid_fnames= [pathlibpath.name for pathlibpath in develop_get_image_files(pth) ][0:10]
-        
+        valid_fnames = [p.name for p in _develop_get_image_files(
+                            pth,
+                            path_to_all_txt=experiment_settings_dict["path_to_all_txt"],
+                            path_to_images=experiment_settings_dict["path_to_images"])][0:10]
     else:
-        sdfe_get_images =sdfe_get_image_files
+        sdfe_get_images = partial(_sdfe_get_image_files,
+                                  path_to_all_txt=experiment_settings_dict["path_to_all_txt"],
+                                  path_to_images=experiment_settings_dict["path_to_images"],
+                                  im_type=experiment_settings_dict["im_type"])
         #validationset
         #sdfe datasets are usually based on all.txt and valid.txt files
         if experiment_settings_dict["path_to_valid_txt"]:
             valid_fnames = (Path(experiment_settings_dict["path_to_valid_txt"])).read_text().split('\n')
         else:
             valid_fnames = None
-    
-    def ListSplitter(valid_items):
-        """
-        param: valid_items: a list with filenames that should be used for validation (and NOT for training)
-        returns: a function that returns two masks, one filtering away all items used for validation, and one filtering away all items used for training
-        """
-
-        def _inner(items):
-            
-            val_mask = tensor([o.name in valid_items for o in items])
-            return [~val_mask, val_mask]
-        return _inner
-
-
 
     #make sure that all files are of correct type (we get problems if the .txt file includes e.g empty lines )
     label_type= experiment_settings_dict["label_image_type"]
     label_folder=Path(experiment_settings_dict["path_to_labels"])
 
-    im_type= experiment_settings_dict["im_type"] 
+    im_type= experiment_settings_dict["im_type"]
     if experiment_settings_dict["path_to_valid_txt"]:
-        
-        valid_fnames=[im_file for im_file in valid_fnames if im_type in im_file]
-
-        
-
-        dataset_splitter= ListSplitter(valid_fnames)
+        valid_fnames = [im_file for im_file in valid_fnames if im_type in im_file]
+        # Use a set for O(1) membership test inside _list_splitter_inner.
+        dataset_splitter = partial(_list_splitter_inner, valid_items=set(valid_fnames))
     else:
-        dataset_splitter= RandomSplitter()
+        dataset_splitter = RandomSplitter()
 
-    
-
-   
     codes = np.loadtxt(experiment_settings_dict["path_to_codes"], dtype=str);
     print(" codes: "+str( codes))
-    
 
-    
-    
-    #IF folder structure is images/subfolder/image.tif
-    #label_func = lambda o: pth / ('labels/masks/') / f'{o.stem}{o.suffix}'
-    def label_func(image_pathlib_path):
-        label_path =  label_folder / f'{image_pathlib_path.stem}{label_type}'
-        return np.array(Image.open(label_path),dtype=np.int32)
-    def building_func(image_pathlib_path):
-        building_path =  Path(experiment_settings_dict["path_to_buildings"]) / f'{image_pathlib_path.stem}{label_type}'
-        return np.array(Image.open(building_path))
-
-    def label_plus_building_func(image_pathlib_path):
-        """
-        Use this function instead of the label_func() function when adding biulding footprints as a label
-
-        update all pixles in the label to the building value IF they have a non-zero value in the bilding label.
-        :param image_pathlib_path:
-        :return:
-        """
-        label = label_func(image_pathlib_path)
-        if not (Path(experiment_settings_dict["path_to_buildings"]) / f'{image_pathlib_path.stem}{label_type}').is_file():
-            #print("building file is missing")
-            return label
-        else:
-            pass #print("building file exist")
-
-        building_label =building_func(image_pathlib_path)
-        green_roof_mask= label==5
-        building_mask= building_label!=0
-        #set label-pixels to buliding value
-        label[building_mask] = building_label[building_mask]
-        #all green roof pixels have been overwritten to buldings. make them green roof again.
-        label[green_roof_mask] = 5
-        return label
-
-    def get_label_func(experiment_settings_dict):
-        if experiment_settings_dict["extra_labels"]=="buildings":
-            input("extending labels with buildings")
-            return label_plus_building_func
-        elif experiment_settings_dict["extra_labels"]=="None":
-            #input("using ordinary labels")
-            return label_func
-        else:
-            sys.exit("experiment_settings_dict['extra_labels'] should be 'buildings' or 'None'")
-            
-
-
-
+    # get_y: pick the right label loader based on extra_labels setting.
+    # Bound via functools.partial so captured state pickles for Windows worker spawn.
+    if experiment_settings_dict["extra_labels"] == "buildings":
+        input("extending labels with buildings")
+        get_y = partial(_label_plus_building_func,
+                        label_folder=label_folder,
+                        path_to_buildings=experiment_settings_dict["path_to_buildings"],
+                        label_type=label_type)
+    elif experiment_settings_dict["extra_labels"] == "None":
+        get_y = partial(_label_func,
+                        label_folder=label_folder,
+                        label_type=label_type)
+    else:
+        sys.exit("experiment_settings_dict['extra_labels'] should be 'buildings' or 'None'")
 
 
 
@@ -525,7 +507,7 @@ def get_dataset(experiment_settings_dict):
     a_dataset = DataBlock(blocks=(ImageBlockReplacement.MultichannelImageBlock(cls=ImageBlockReplacement.MultiChannelImage,experiment_settings_dict=experiment_settings_dict), MaskBlock(codes)),
                    get_items=sdfe_get_images,
                    splitter=dataset_splitter,
-                   get_y=get_label_func(experiment_settings_dict),
+                   get_y=get_y,
                    item_tfms=sdfi_tfm,
                    batch_tfms=batch_tfms)  #*aug_transforms(),
                    
@@ -547,7 +529,16 @@ def get_dataset(experiment_settings_dict):
         print("not using pin_memory #####################################################################")
     print("experiment_settings_dict['prefetch_factor']: "+str(experiment_settings_dict["prefetch_factor"]))
 
-    dls = a_dataset.dataloaders(Path(experiment_settings_dict["path_to_images"]) , bs=experiment_settings_dict["batch_size"], num_workers=int(experiment_settings_dict["num_workers"]) ,pin_memory = experiment_settings_dict.get("pin_memory"),prefetch_factor = int(experiment_settings_dict["prefetch_factor"]))
+    _num_workers = int(experiment_settings_dict["num_workers"])
+    # persistent_workers keeps the spawned workers alive between epochs so we
+    # don't pay the (very expensive on Windows) spawn cost every epoch. Only
+    # meaningful when num_workers > 0; PyTorch errors if set with num_workers=0.
+    dls = a_dataset.dataloaders(Path(experiment_settings_dict["path_to_images"]),
+                                bs=experiment_settings_dict["batch_size"],
+                                num_workers=_num_workers,
+                                pin_memory=experiment_settings_dict.get("pin_memory"),
+                                prefetch_factor=int(experiment_settings_dict["prefetch_factor"]),
+                                persistent_workers=(_num_workers > 0))
 
 
     #if we use cropping as augmetnation for training we might want to reduce the batchsize during validation to make sure we dont use to much memory

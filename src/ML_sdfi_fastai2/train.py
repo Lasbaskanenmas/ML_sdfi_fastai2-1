@@ -243,14 +243,25 @@ class SwinUPerNetWrapper(nn.Module):
     
     def _adapt_input_channels(self, n_in):
         try:
-            if hasattr(self.model, 'backbone'):
-                old_patch_embed = self.model.backbone.embeddings.patch_embeddings.projection
-            elif hasattr(self.model, 'swin'):
-                old_patch_embed = self.model.swin.embeddings.patch_embeddings.projection
+            # Resolve the SwinEmbeddings holder once, then read+write its patch projection.
+            # transformers 5.x: the UPerNet backbone (SwinBackbone) wraps a SwinModel at `.swin`,
+            # so the real path is backbone.swin.embeddings...; a bare SwinModel exposes `.swin`
+            # directly. The old `backbone.embeddings...` path was missing the `.swin` hop.
+            backbone = getattr(self.model, 'backbone', None)
+            swin_model = getattr(backbone, 'swin', None)
+            if swin_model is None:
+                swin_model = getattr(self.model, 'swin', None)
+            if swin_model is not None and hasattr(swin_model, 'embeddings'):
+                swin_embeddings = swin_model.embeddings
+            elif backbone is not None and hasattr(backbone, 'embeddings'):
+                swin_embeddings = backbone.embeddings
             else:
-                print("Warning: Could not find patch embedding layer to adapt")
-                return
-            
+                raise AttributeError(
+                    "could not locate SwinEmbeddings (tried backbone.swin, model.swin, backbone)"
+                )
+
+            old_patch_embed = swin_embeddings.patch_embeddings.projection
+
             new_patch_embed = nn.Conv2d(
                 n_in,
                 old_patch_embed.out_channels,
@@ -259,21 +270,24 @@ class SwinUPerNetWrapper(nn.Module):
                 padding=old_patch_embed.padding,
                 bias=old_patch_embed.bias is not None
             )
-            
+
             nn.init.kaiming_normal_(new_patch_embed.weight, mode='fan_out', nonlinearity='relu')
             if new_patch_embed.bias is not None:
                 nn.init.constant_(new_patch_embed.bias, 0)
-            
+
             if n_in >= 3 and old_patch_embed.weight.shape[1] == 3:
                 with torch.no_grad():
                     new_patch_embed.weight[:, :3] = old_patch_embed.weight
-            
-            if hasattr(self.model, 'backbone'):
-                self.model.backbone.embeddings.patch_embeddings.projection = new_patch_embed
-            elif hasattr(self.model, 'swin'):
-                self.model.swin.embeddings.patch_embeddings.projection = new_patch_embed
+
+            swin_embeddings.patch_embeddings.projection = new_patch_embed
         except Exception as e:
-            print(f"Warning: Could not adapt input channels: {e}")
+            # Fail loud: silently skipping leaves a 3-channel conv that then crashes at forward
+            # with mismatched channels. Surface the real cause (likely a transformers API change
+            # in the patch_embeddings attribute path) immediately instead.
+            raise RuntimeError(
+                f"Could not adapt input channels to n_in={n_in}; the patch_embeddings attribute "
+                f"path may have moved in this transformers version: {e}"
+            ) from e
     
     def forward(self, x):
         outputs = self.model(pixel_values=x)
@@ -291,22 +305,28 @@ class SwinUPerNetWrapper(nn.Module):
 # ---------------------------------------------------------------------
 # ConvNeXt V2 + UPerNet (transformers-based)
 # ---------------------------------------------------------------------
-class ConvNeXtV2UPerNetWrapper(nn.Module):
-    """ConvNeXt V2 backbone + UPerNet decoder using transformers library"""
+class ConvNeXtUPerNetWrapper(nn.Module):
+    """ConvNeXt (V1) backbone + UPerNet decoder via transformers.
+
+    Loads openmmlab/upernet-convnext-* (ImageNet-22k -> ADE20K) — backbone AND UPerNet decoder
+    pretrained; only the final classifier reinitializes for our class count. These are ConvNeXt
+    V1 checkpoints: no pretrained ConvNeXt-V2 + UPerNet weights exist in HF format.
+    """
     def __init__(self, backbone_name, num_classes, n_in, pretrained=True):
         super().__init__()
         try:
             from transformers import AutoModelForSemanticSegmentation, UperNetConfig
         except ImportError:
             raise ImportError(
-                "ConvNeXtV2+UPerNet requires transformers: pip install transformers"
+                "ConvNeXt+UPerNet requires transformers: pip install transformers"
             )
-        
+
         self.num_classes = num_classes
         self.n_in = n_in
-        
-        # Map backbone names to HuggingFace model IDs
-        arch = backbone_name.replace("convnextv2_", "")
+
+        # Map backbone names to HuggingFace model IDs. Strip both the honest "convnext_" prefix and
+        # the legacy "convnextv2_" prefix so either config name resolves to the same V1 checkpoint.
+        arch = backbone_name.replace("convnextv2_", "").replace("convnext_", "")
         model_map = {
             "tiny": "openmmlab/upernet-convnext-tiny",
             "small": "openmmlab/upernet-convnext-small", 
@@ -365,7 +385,13 @@ class ConvNeXtV2UPerNetWrapper(nn.Module):
             else:
                 print("Warning: Could not find patch embedding layer to adapt")
         except Exception as e:
-            print(f"Warning: Could not adapt input channels: {e}")
+            # Fail loud: silently skipping leaves a 3-channel conv that then crashes at forward
+            # with mismatched channels. Surface the real cause (likely a transformers API change
+            # in the patch_embeddings attribute path) immediately instead.
+            raise RuntimeError(
+                f"Could not adapt input channels to n_in={n_in}; the patch_embeddings attribute "
+                f"path may have moved in this transformers version: {e}"
+            ) from e
 
     def forward(self, x):
         outputs = self.model(pixel_values=x)
@@ -383,6 +409,9 @@ class BasicTrainingFastai2:
     def __init__(self, cfg, dls):
         self.cfg = cfg
         self.learn = self._build_learner(cfg, dls)
+
+    # Backward-compat alias is defined after the class body (see below): infer.py and
+    # sdfi_transforms.py still reference the pre-refactor name `basic_traininFastai2`.
 
     def _num_classes(self):
         """Get number of classes from config or codes file"""
@@ -418,12 +447,17 @@ class BasicTrainingFastai2:
         return CrossEntropyLossFlat(axis=1, ignore_index=ignore, weight=weights)
 
     def _metric(self, ignore):
-        """Create accuracy metric that respects ignore_index"""
-        def acc(inp, targ):
+        """Create accuracy metric that respects ignore_index.
+
+        Named `valid_accuracy` so the fastai/W&B column matches segformer_train.py's metric,
+        letting all models overlay on the same chart (fastai derives the column from __name__,
+        and metrics are evaluated on the validation set).
+        """
+        def valid_accuracy(inp, targ):
             targ = targ.squeeze(1)
             mask = targ != ignore
             return (inp.argmax(1)[mask] == targ[mask]).float().mean()
-        return acc
+        return valid_accuracy
 
     def _build_learner(self, cfg, dls):
         """Build the appropriate learner based on model type"""
@@ -432,13 +466,13 @@ class BasicTrainingFastai2:
         metric = self._metric(ignore)
         model_id = cfg["model"]
 
-        # ConvNeXt V2 + UPerNet
+        # ConvNeXt (V1) + UPerNet
         if isinstance(model_id, str) and model_id.endswith("_upernet"):
-            print("Building ConvNeXt V2 + UPerNet")
-            model = ConvNeXtV2UPerNetWrapper(
+            print("Building ConvNeXt (V1) + UPerNet")
+            model = ConvNeXtUPerNetWrapper(
                 backbone_name=model_id.replace("_upernet", ""),
                 num_classes=self._num_classes(),
-                n_in=len(cfg["means"]),
+                n_in=sdfi_utils.n_in_from_settings(cfg),
                 pretrained=cfg.get("pretrained", True),
             )
             learn = Learner(
@@ -459,7 +493,7 @@ class BasicTrainingFastai2:
             model = SwinUPerNetWrapper(
                 model_name=model_name,
                 num_classes=self._num_classes(),
-                n_in=len(cfg["means"]),
+                n_in=sdfi_utils.n_in_from_settings(cfg),
                 pretrained=cfg.get("pretrained", True),
                 ignore_index=ignore
             )
@@ -484,7 +518,7 @@ class BasicTrainingFastai2:
             model = SegFormerWrapper(
                 model_name=model_name,
                 num_classes=self._num_classes(),
-                n_in=len(cfg["means"]),
+                n_in=sdfi_utils.n_in_from_settings(cfg),
                 pretrained=cfg.get("pretrained", True),
                 ignore_index=ignore
             )
@@ -500,7 +534,7 @@ class BasicTrainingFastai2:
                 dls, model_id,
                 loss_func=loss_func,
                 metrics=metric,
-                n_in=len(cfg["means"]),
+                n_in=sdfi_utils.n_in_from_settings(cfg),
                 bottleneck=cfg.get("bottleneck"),
                 pretrained=cfg.get("pretrained", True),
                 path=cfg["log_folder"],
@@ -514,12 +548,21 @@ class BasicTrainingFastai2:
                 dls, model_id,
                 loss_func=loss_func,
                 metrics=metric,
-                n_in=len(cfg["means"]),
+                n_in=sdfi_utils.n_in_from_settings(cfg),
                 path=cfg["log_folder"],
                 model_dir=cfg["model_folder"]
             )
 
-        return learn.to_fp16() if cfg.get("to_fp16", False) else learn
+        # Mixed precision (opt-in via config). bf16 is preferred over fp16 on Ampere+ (A100):
+        # same ~2x speedup, but bf16 keeps fp32's exponent range so it needs no loss scaling and
+        # is far more stable. If both keys are set, bf16 wins. Plain fp32 when neither is set.
+        if cfg.get("to_bf16", False):
+            print("training with bf16 mixed precision")
+            return learn.to_bf16()
+        if cfg.get("to_fp16", False):
+            print("training with fp16 mixed precision")
+            return learn.to_fp16()
+        return learn
 
     def find_learning_rate(self, show_images=False):
         """Find optimal learning rate"""
@@ -561,8 +604,10 @@ class BasicTrainingFastai2:
         
         # Setup callbacks
         n_batch = self.cfg.get("save_on_batch_iter_modulus_n", 0)
-        start_epoch = self.cfg.get("last_epoch", -1) + 1
-        
+        # last_epoch is `false` (parsed to False) for a fresh run; only resume past 0 when it is a
+        # positive int. Guard against `False + 1 == 1` which would skip epoch 0 of the schedule.
+        start_epoch = (self.cfg["last_epoch"] + 1) if self.cfg.get("last_epoch") else 0
+
         cbs = [
             GradientAccumulation(self.cfg.get("n_acc", 1)),
             GradientClip(self.cfg.get("gradient_clip", 1.0)),
@@ -574,12 +619,29 @@ class BasicTrainingFastai2:
             ),
             CSVLoggerWithLR(fname=self.cfg["job_name"] + ".csv", append=True),
         ]
-        
+
         #if n_batch > 0:
         #    cbs.append(DoThingsAfterBatch(n_batch=n_batch))
-        
-        # Train with appropriate scheduler
-        scheduler = self.cfg.get("scheduler", "fit_one_cycle")
+
+        # Optional Weights & Biases tracking (opt-in via `use_wandb` config flag).
+        # Imported lazily so wandb stays an optional dependency for non-tracked runs.
+        use_wandb = self.cfg.get("use_wandb", False)
+        if use_wandb:
+            import wandb
+            from fastai.callback.wandb import WandbCallback
+            # Load WANDB_API_KEY (and any optional WANDB_* overrides) from the repo-root .env
+            # so wandb.init() can authenticate without requiring `wandb login` to have been run.
+            from dotenv import load_dotenv
+            load_dotenv(dotenv_path=pathlib.Path(__file__).resolve().parents[2] / '.env')
+            wandb.init(project=self.cfg.get("wandb_project", "sdfi-segmentation"),
+                       name=self.cfg["job_name"],
+                       config={k: str(v) for k, v in self.cfg.items()},
+                       dir=str(self.cfg["log_folder"]))
+            cbs.append(WandbCallback(log_preds=False))
+
+        # Train with appropriate scheduler. Configs spell the key "sceduler" (legacy typo); accept
+        # both so the config's choice is actually honored rather than always defaulting.
+        scheduler = self.cfg.get("scheduler") or self.cfg.get("sceduler", "fit_one_cycle")
         
         if scheduler == "fit_one_cycle":
             self.learn.fit_one_cycle(
@@ -601,6 +663,12 @@ class BasicTrainingFastai2:
         # Save final model
         print("Saving model")
         self.learn.save(self.cfg["job_name"])
+        if use_wandb:
+            wandb.finish()
+
+
+# Pre-refactor name still used by infer.py and transforms/sdfi_transforms.py.
+basic_traininFastai2 = BasicTrainingFastai2
 
 
 # ---------------------------------------------------------------------
@@ -675,6 +743,8 @@ if __name__ == "__main__":
         if args.deterministic:
             cfg["num_workers"] = 1
             make_deterministic()
-        
+        else:
+            sdfi_utils.apply_performance_settings(cfg)
+
         infer_model_and_log_folders(cfg)
         train_experiment(cfg)

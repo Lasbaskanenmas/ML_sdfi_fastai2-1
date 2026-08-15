@@ -159,6 +159,76 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-# Local tokens (never commit)
+# ============================================================
+# Secrets and credentials — NEVER COMMIT
+# ============================================================
+*token*
+*hftoken*
+*_token.txt
 my_hugging_face_token.txt
 my_huggingface_token.txt
+hftoken_write.txt
+# re-allow legitimate HuggingFace model files that contain "token" in the name
+!tokenizer_config.json
+!special_tokens_map.json
+
+*secret*
+*credential*
+.credentials
+.git-credentials
+.netrc
+_netrc
+*.key
+*.pem
+*.pfx
+*.p12
+
+# .env is covered above; these catch the variants
+.env.*
+*.env
+!.env.example
+
+# service caches that hold API keys
+.huggingface/
+.wandb/
+.aws/
+.azure/
+.claude/.credentials*
+.claude/settings.local.json
+
+# ============================================================
+# Large artefacts — these live on Hugging Face or in logs_and_models
+# ============================================================
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+*.h5
+*.hdf5
+*.onnx
+
+*.tif
+*.tiff
+*.tfw
+*.tif.ovr
+*.tif.aux.xml
+*.npy
+*.npz
+*.pkl
+*.pickle
+
+wandb/
+runs/
+mlruns/
+lightning_logs/
+
+*.zip
+*.tar
+*.tar.gz
+*.7z
+*.bak
+*.old
+
+# defensive, in case git is ever run from c:\thesis
+logs_and_models/
+envs/

@@ -51,7 +51,9 @@ class SaveSegmentationOutput(Callback):
 
         #now tryong to save probabilities in teh same way"
         #after aplying softmax I get identicall numbers for the first 10 numbers! (obs no log)
-        batch_probs = torch.nn.functional.softmax(self.learn.pred).cpu().numpy()
+        # .float(): under bf16/fp16 autocast learn.pred is a half-precision tensor here (this
+        # callback runs before MixedPrecision.after_pred casts back), and numpy has no bfloat16.
+        batch_probs = torch.nn.functional.softmax(self.learn.pred.float(), dim=1).cpu().numpy()
 
 
 
@@ -209,6 +211,31 @@ def save_probabilities_as_uint8(queue,verbose= False):
         # Handle Ctrl+C gracefully by terminating the process
         pass
 
+def maybe_init_wandb(experiment_settings_dict):
+    """Opt-in Weights & Biases tracking for inference jobs (`use_wandb = true` in the config).
+
+    fastai's WandbCallback only hooks into fit(), so inference runs are tracked with a plain
+    wandb.init instead. job_type="inference" separates these runs from training in the W&B UI.
+    Returns the wandb module (for log/finish) or None when tracking is off.
+    Called inside the inference process (which may be spawned), not the parent.
+    """
+    if not experiment_settings_dict.get("use_wandb", False):
+        return None
+    import wandb
+    from dotenv import load_dotenv
+    load_dotenv(dotenv_path=pathlib.Path(__file__).resolve().parents[2] / '.env')
+    # dir= keeps the local wandb staging files in the job's logs folder (same convention as
+    # train.py) instead of a wandb/ folder in the current working directory.
+    log_folder = Path(experiment_settings_dict["log_folder"])
+    log_folder.mkdir(parents=True, exist_ok=True)
+    wandb.init(project=experiment_settings_dict.get("wandb_project", "sdfi-segmentation"),
+               name=experiment_settings_dict["job_name"],
+               job_type="inference",
+               dir=str(log_folder),
+               config={k: str(v) for k, v in experiment_settings_dict.items()})
+    return wandb
+
+
 def infer_with_get_preds_on_all(training,files):
     dl = training.learn.dls.test_dl(files)
     #no gradients should be computed during inference!
@@ -285,8 +312,15 @@ def infer_all(experiment_settings_dict,benchmark_folder,output_folder,show,all_t
     infer_on_all_start_time = time.time()
     list_of_created_files = []
 
+    # Opt-in TF32/cudnn_benchmark (same keys as the trainers). Called here, inside the spawned
+    # inference process, because backend flags set in the parent do not survive 'spawn'.
+    sdfi_utils.apply_performance_settings(experiment_settings_dict)
+    wandb = maybe_init_wandb(experiment_settings_dict)
 
     all_files = Path(all_txt).read_text().split('\n')
+    # Skip blank lines and '#'-commented entries (e.g. tiles disabled due to corrupt data),
+    # matching sdfi_dataset's reading of the same txt files.
+    all_files=[a_path for a_path in all_files if a_path.strip() and not a_path.lstrip().startswith('#')]
     all_files=[Path(benchmark_folder)/Path(experiment_settings_dict["datatypes"][0])/Path(a_path) for a_path in all_files]
 
 
@@ -344,6 +378,13 @@ def infer_all(experiment_settings_dict,benchmark_folder,output_folder,show,all_t
         data_to_save_queue.put(None) # Each save worker needs a Signal to tell it that we are done
     print("all data has now been predicted")
 
+    if wandb:
+        elapsed = time.time() - infer_on_all_start_time
+        wandb.log({"n_tiles_classified": len(all_files),
+                   "inference_seconds": elapsed,
+                   "seconds_per_tile": elapsed / max(len(all_files), 1)})
+        wandb.finish()
+
     return []
 
 
@@ -364,8 +405,14 @@ def infer_on_all(experiment_settings_dict,benchmark_folder,output_folder,show,al
     Saves semantic-segmentation-inference-images in output_folder
     """
 
-    #list paths to all images   
+    # Opt-in TF32/cudnn_benchmark (same keys as the trainers).
+    sdfi_utils.apply_performance_settings(experiment_settings_dict)
+    wandb = maybe_init_wandb(experiment_settings_dict)
+
+    #list paths to all images
     all_files = Path(all_txt).read_text().split('\n')
+    # Skip blank lines and '#'-commented entries, matching sdfi_dataset's reading of the same txt files.
+    all_files=[a_path for a_path in all_files if a_path.strip() and not a_path.lstrip().startswith('#')]
     all_files=[Path(benchmark_folder)/Path(experiment_settings_dict["datatypes"][0])/Path(a_path) for a_path in all_files]
     print("####################")
     print("classifying in totall : "+str(len(all_files))+ " nr of images")
@@ -477,6 +524,13 @@ def infer_on_all(experiment_settings_dict,benchmark_folder,output_folder,show,al
 
     infer_on_all_end_time =time.time()
     print("infer_on_all took :"+str(infer_on_all_end_time-infer_on_all_start_time))
+
+    if wandb:
+        elapsed = infer_on_all_end_time - infer_on_all_start_time
+        wandb.log({"n_tiles_classified": len(all_files),
+                   "inference_seconds": elapsed,
+                   "seconds_per_tile": elapsed / max(len(all_files), 1)})
+        wandb.finish()
 
     return list_of_created_files
 

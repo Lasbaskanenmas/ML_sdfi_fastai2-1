@@ -185,6 +185,42 @@ def get_channel(channel,extra_channel_shape ):
     return new_channel
 
 
+def n_in_from_settings(experiment_settings_dict):
+    """
+    The total number of input channels the model must accept.
+
+    This is the number of BANDS summed over every datatype, which equals len(means). It is NOT the
+    number of datatypes, len(channels). "channels" is a list of per-datatype band-index lists, so
+    rgb is [[0,1,2]] (1 datatype, 3 bands) and the all-source config is
+    [[0,1,2],[0],[0,1,2],[0],[0],[0]] (6 datatypes, 10 bands). Passing len(channels) to
+    unet_learner builds the encoder too narrow and the run then dies on the first forward pass with
+    a conv-weight shape error that says nothing about which config key is at fault.
+
+    :param experiment_settings_dict: the parsed settings dictionary
+    :return: n_in, the total number of bands
+    """
+    means = experiment_settings_dict["means"]
+    stds = experiment_settings_dict["stds"]
+    channels = experiment_settings_dict["channels"]
+    datatypes = experiment_settings_dict["datatypes"]
+    bands_described_by_channels = sum(len(bands_of_one_datatype) for bands_of_one_datatype in channels)
+
+    if len(means) != len(stds):
+        sys.exit("config error: len(means)=" + str(len(means)) + " != len(stds)=" + str(len(stds)))
+
+    if len(channels) != len(datatypes):
+        sys.exit("config error: len(channels)=" + str(len(channels)) + " != len(datatypes)=" +
+                 str(len(datatypes)) + ", every datatype needs exactly one list of band indexes")
+
+    if len(means) != bands_described_by_channels:
+        sys.exit("config error: len(means)=" + str(len(means)) + " but 'channels'=" + str(channels) +
+                 " describes " + str(bands_described_by_channels) + " bands over " + str(len(channels)) +
+                 " datatypes. n_in must equal the total number of bands, so means and stds need one"
+                 " value per band, not one value per datatype.")
+
+    return len(means)
+
+
 # open an image and convert it to a tensor
 def open_img(path,channels=['r','g','b','ni'],channels_to_zero_out=[]):
     """
@@ -516,7 +552,7 @@ class basic_traininFastai2:
             a_loss_func= CrossEntropyLossFlat(axis=1,ignore_index=ignore_index) #reduction decisdes if the output should be summed or averaged in any way (this changes teh dimensions of the loss)
             learn = unet_learner(dls, self.experiment_settings_dict["model"], loss_func=a_loss_func,metrics=valid_accuracy, wd=1e-2,
                                  path= self.experiment_settings_dict["log_folder"],
-                                 model_dir=self.experiment_settings_dict["model_folder"] ,n_in=len(experiment_settings_dict["channels"]))#callback_fns=[partial(CSVLogger, filename= experiment_settings_dict["job_name"], append=True)])
+                                 model_dir=self.experiment_settings_dict["model_folder"] ,n_in=n_in_from_settings(experiment_settings_dict))#callback_fns=[partial(CSVLogger, filename= experiment_settings_dict["job_name"], append=True)])
         else:
             sys.exit("in order to use other learningrate schedule than fit_one_cykle  copy functionality from segmentation4channels.py")
 

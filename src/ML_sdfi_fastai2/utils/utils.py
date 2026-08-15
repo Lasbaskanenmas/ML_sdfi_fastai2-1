@@ -38,6 +38,12 @@ def get_model(model_name):
         # Swin + UPerNet models
         return model_name
     elif model_name in [
+        # Honest names: these load openmmlab ConvNeXt-V1 + UPerNet (no pretrained V2+UPerNet exists).
+        "convnext_tiny_upernet",
+        "convnext_small_upernet",
+        "convnext_base_upernet",
+        "convnext_large_upernet",
+        # Legacy "convnextv2_*" names kept for back-compat; they resolve to the same V1 checkpoints.
         "convnextv2_tiny_upernet",
         "convnextv2_small_upernet",
         "convnextv2_base_upernet",
@@ -92,6 +98,44 @@ def load_settings_from_config_file(config_file_path):
     print("##############################################################################################################################")
     return settings_dictionary
 
+def n_in_from_settings(experiment_settings_dict):
+    """
+    The total number of input channels the model must accept, checked against the rest of the config.
+
+    n_in is the number of BANDS summed over every datatype, which equals len(means). It is NOT the
+    number of datatypes, len(channels). "channels" is a list of per-datatype band-index lists, so
+    rgb is [[0,1,2]] (1 datatype, 3 bands) and the all-source config is
+    [[0,1,2],[0],[0,1,2],[0],[0],[0]] (6 datatypes, 10 bands).
+
+    Without this check a config whose means/stds do not match its channels still builds a model, and
+    the run only dies later on the first forward pass with a conv-weight shape error that says
+    nothing about which config key is at fault. Here it fails immediately and names the mismatch.
+
+    :param experiment_settings_dict: the parsed settings dictionary
+    :return: n_in, the total number of bands
+    """
+    means = experiment_settings_dict["means"]
+    stds = experiment_settings_dict["stds"]
+    channels = experiment_settings_dict["channels"]
+    datatypes = experiment_settings_dict["datatypes"]
+    bands_described_by_channels = sum(len(bands_of_one_datatype) for bands_of_one_datatype in channels)
+
+    if len(means) != len(stds):
+        sys.exit("config error: len(means)=" + str(len(means)) + " != len(stds)=" + str(len(stds)))
+
+    if len(channels) != len(datatypes):
+        sys.exit("config error: len(channels)=" + str(len(channels)) + " != len(datatypes)=" +
+                 str(len(datatypes)) + ", every datatype needs exactly one list of band indexes")
+
+    if len(means) != bands_described_by_channels:
+        sys.exit("config error: len(means)=" + str(len(means)) + " but 'channels'=" + str(channels) +
+                 " describes " + str(bands_described_by_channels) + " bands over " + str(len(channels)) +
+                 " datatypes. n_in must equal the total number of bands, so means and stds need one"
+                 " value per band, not one value per datatype.")
+
+    return len(means)
+
+
 def save_dictionary_to_disk(experiment_settings_dict):
     """
     Saves the content of the dictionary as a json file
@@ -105,3 +149,24 @@ def save_dictionary_to_disk(experiment_settings_dict):
     #Store all job configurations as json file in the log folder
     with open(experiment_settings_dict["log_folder"]/Path(experiment_settings_dict["job_name"]+ "_job_dictionary.json"), "w") as out_file:
         json.dump(json_serializable_dictionary, out_file, indent = 6)
+
+
+def apply_performance_settings(settings_dictionary):
+    """Opt-in, comparability-safe GPU execution speedups (off by default).
+
+    These change only *how fast* kernels run, not the math or precision (bf16 stays bf16),
+    so any numerical effect is at floating-point rounding-noise level (~1e-6) -- far below the
+    bf16 noise floor and the between-model gaps. Controlled per-run via config keys:
+      cudnn_benchmark = true   -> autotune the fastest conv algorithm for the (fixed) input size
+      tf32            = true   -> allow TF32 on matmul + cuDNN (helps any fp32-path ops)
+    Do NOT combine with make_deterministic() (which sets cudnn.benchmark=False on purpose);
+    callers gate this to the non-deterministic path.
+    """
+    import torch
+    if settings_dictionary.get("cudnn_benchmark", False):
+        torch.backends.cudnn.benchmark = True
+        print("performance: cudnn.benchmark = True")
+    if settings_dictionary.get("tf32", False):
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        print("performance: TF32 enabled (matmul + cuDNN)")
