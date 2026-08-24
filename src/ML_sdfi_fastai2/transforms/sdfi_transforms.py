@@ -181,6 +181,60 @@ def check_for_nan_in_numpy_array(array,info="info to show if there are nans"):
             print("info:"+str(info))
             sys.exit("stoped excecution becaus of nan in tensor :"+str(info))
 
+# -------------------------------------------------------------------------------------------------
+# Channel dtype handling for the albumentations wrappers.   FIXED 2026-08-15.
+#
+# Every wrapper below used to do, before augmenting:
+#       img = np.array(img, dtype=np.uint8).astype(np.uint8).copy()
+# That is lossless for the imagery bands (rgb, cir, OrtoRGB, OrtoCIR are uint8 0-255) but
+# DESTRUCTIVE for DSM/DTM, which hold float32 METRES at 0.1 m GSD. They were truncated to integer
+# metres, collapsing one tile's DSM from 48,698 distinct values to 18 and DTM to 3. Measured in
+# exploratory_data_analysis/results/findings/2026-08-14_preflight_ndsm.md.
+#
+# Pre-fix source: commit 1a2640809620b50ea307c1676866c927b2927d3f on thesis/spatial-matrix-2026,
+# plus a git-independent copy in exploratory_data_analysis/provenance/.
+#
+# Not every op tolerates float32. Measured on albumentations 1.3.0:
+#   float-SAFE  : Transpose, HorizontalFlip, VerticalFlip, RandomRotate90, ShiftScaleRotate,
+#                 RandomCrop, CenterCrop, LongestMaxSize, RandomShadow, ChannelDropout
+#                 -> values preserved exactly, so the array is simply passed through as float32.
+#   float-UNSAFE: GaussNoise, RandomBrightness, ColorJitter
+#                 -> these assume float images live in [0,1] and clip elevation metres to 1.0.
+#                    They are therefore applied ONLY to the bands that survive a uint8 round trip,
+#                    and the float bands pass through untouched.
+# -------------------------------------------------------------------------------------------------
+def _as_float_hwc(img_hwc):
+    """Contiguous float32 array for a float-safe albumentations op. Loses no precision."""
+    return np.ascontiguousarray(img_hwc, dtype=np.float32)
+
+
+def _uint8_lossless_bands(img_hwc):
+    """Boolean mask over the channel axis: which bands survive a uint8 round trip unchanged?
+
+    True for uint8 imagery (rgb/cir/Orto*), False for DSM/DTM/nDSM in metres. Data-driven rather
+    than a hard-coded band list, so it stays correct for any channel configuration.
+    """
+    flat = np.asarray(img_hwc).reshape(-1, np.shape(img_hwc)[-1])
+    return np.all((flat >= 0) & (flat <= 255) & (flat == np.floor(flat)), axis=0)
+
+
+def _augment_intensity_uint8_bands(aug, img_hwc, mask):
+    """Run a float-unsafe intensity augmentation on the uint8-representable bands only.
+
+    Returns (image_hwc_float32, mask). Elevation bands pass through unchanged, which is what the
+    old uint8 round trip was silently failing to do.
+    """
+    img_hwc = np.ascontiguousarray(img_hwc, dtype=np.float32)
+    safe = _uint8_lossless_bands(img_hwc)
+    out = img_hwc.copy()
+    if safe.any():
+        sub = np.ascontiguousarray(img_hwc[..., safe], dtype=np.uint8)
+        res = aug(image=sub, mask=np.array(mask))
+        out[..., safe] = np.asarray(res["image"], dtype=np.float32)
+        return out, res["mask"]
+    return out, np.array(mask)
+
+
 class SegmentationAlbumentationsChannel_dropout(ItemTransform):
     def __init__(self,droppable_channels,split_idx=0, order=100):
         ItemTransform.__init__(self,split_idx=split_idx, order=order)
@@ -191,7 +245,7 @@ class SegmentationAlbumentationsChannel_dropout(ItemTransform):
         img,mask = x
         
         img= np.transpose(img,(1,2,0)) #channel,y,x to ,y,x,chanel
-        img=np.array(img,dtype=np.uint8).astype(np.uint8).copy()
+        img=_as_float_hwc(img)
         aug = self.aug(image=img, mask=np.array(mask))
 
 
@@ -211,7 +265,7 @@ class SegmentationAlbumentationsRandomCrop(ItemTransform):
     def encodes(self, x):
         img,mask = x
         img= np.transpose(img,(1,2,0))
-        img=np.array(img,dtype=np.uint8).astype(np.uint8).copy()
+        img=_as_float_hwc(img)
         aug = self.aug(image=img, mask=np.array(mask))
         return ImageBlockReplacement.MultiChannelImage.create(np.array(np.transpose(aug["image"],(2,0,1)),dtype=np.float32)), PILMask.create(aug["mask"])
 #fixed centre crop during validaiton in order to get the same input each time
@@ -223,7 +277,7 @@ class SegmentationAlbumentationsCentreCrop(ItemTransform):
     def encodes(self, x):
         img,mask = x
         img= np.transpose(img,(1,2,0))
-        img=np.array(img,dtype=np.uint8).astype(np.uint8).copy()
+        img=_as_float_hwc(img)
         aug = self.aug(image=img, mask=np.array(mask))
         return ImageBlockReplacement.MultiChannelImage.create(np.array(np.transpose(aug["image"],(2,0,1)),dtype=np.float32)), PILMask.create(aug["mask"])
 
@@ -237,7 +291,7 @@ class SegmentationAlbumentationsResize(ItemTransform):
         if len(x)==2:
             img,mask = x
             img= np.transpose(img,(1,2,0))
-            img=np.array(img,dtype=np.uint8).astype(np.uint8).copy()
+            img=_as_float_hwc(img)
             aug = self.aug(image=img, mask=np.array(mask))
             return ImageBlockReplacement.MultiChannelImage.create(np.array(np.transpose(aug["image"],(2,0,1)),dtype=np.float32)), PILMask.create(aug["mask"])
         else:
@@ -245,7 +299,7 @@ class SegmentationAlbumentationsResize(ItemTransform):
 
             img= x[0]
             img= np.transpose(img,(1,2,0))
-            img=np.array(img,dtype=np.uint8).astype(np.uint8).copy()
+            img=_as_float_hwc(img)
             aug = self.aug(image=img)
             return [ImageBlockReplacement.MultiChannelImage.create(np.array(np.transpose(aug["image"],(2,0,1)),dtype=np.float32))]
 
@@ -256,7 +310,7 @@ class SegmentationAlbumentationsVerticalFlip(ItemTransform):
     def encodes(self, x):
         img,mask = x
         img= np.transpose(img,(1,2,0))
-        img=np.array(img,dtype=np.uint8).astype(np.uint8).copy()
+        img=_as_float_hwc(img)
         aug = self.aug(image=img, mask=np.array(mask))
         return ImageBlockReplacement.MultiChannelImage.create(np.array(np.transpose(aug["image"],(2,0,1)),dtype=np.float32)), PILMask.create(aug["mask"])
 class SegmentationAlbumentationsRandomRotate90(ItemTransform):
@@ -266,15 +320,22 @@ class SegmentationAlbumentationsRandomRotate90(ItemTransform):
     def encodes(self, x):
         img,mask = x
         img= np.transpose(img,(1,2,0))
-        img=np.array(img,dtype=np.uint8).astype(np.uint8).copy()
+        img=_as_float_hwc(img)
         aug = self.aug(image=img, mask=np.array(mask))
         return ImageBlockReplacement.MultiChannelImage.create(np.array(np.transpose(aug["image"],(2,0,1)),dtype=np.float32)), PILMask.create(aug["mask"])
 class SegmentationAlbumentationsHorizontalFlip(ItemTransform):
-    def __init__(self,split_idx): self.aug = albumentations.HorizontalFlip(p=0.05)
+    def __init__(self,split_idx):
+        # FIXED 2026-08-15: this call was missing, so split_idx was discarded and defaulted to None,
+        # meaning "apply to BOTH splits". A 5% horizontal flip was therefore running on the
+        # validation pass (measured: 11 of 200 valid tiles mirrored), unlike every sibling class
+        # here, all of which forward split_idx correctly. Inference was unaffected because
+        # test_dl carries none of these item transforms.
+        ItemTransform.__init__(self,split_idx=split_idx)
+        self.aug = albumentations.HorizontalFlip(p=0.05)
     def encodes(self, x):
         img,mask = x
         img= np.transpose(img,(1,2,0))
-        img=np.array(img,dtype=np.uint8).astype(np.uint8).copy()
+        img=_as_float_hwc(img)
         aug = self.aug(image=img, mask=np.array(mask))
         return ImageBlockReplacement.MultiChannelImage.create(np.array(np.transpose(aug["image"],(2,0,1)),dtype=np.float32)), PILMask.create(aug["mask"])
 
@@ -288,18 +349,19 @@ class SegmentationAlbumentationsTransformGaussNoise(ItemTransform):
         #check_for_nan_in_tensor(img,"before GaussNoise")
         #albumetations asume the order of the channels is h,w,channels but the tensors are channels,h,w 
         img= np.transpose(img,(1,2,0))
-        img=np.array(img,dtype=np.uint8).astype(np.uint8).copy()
-        aug = self.aug(image=img, mask=np.array(mask))
-        
+        # GaussNoise is float-UNSAFE (it assumes float images are in [0,1] and would clip elevation
+        # metres to 1.0), so it runs on the uint8 imagery bands only; elevation passes through.
+        aug_image, aug_mask = _augment_intensity_uint8_bands(self.aug, img, mask)
+
         #if the transformation introduced nan in the data, use the original data instead
         #if np.isnan(aug["image"]).any():
         #            return x
-        
-        
+
+
         #after transfomr is donw we need to transpose the tensor back to channels,h,w
         #check_for_nan_in_numpy_array(aug["image"],"after aug data")
         #check_for_nan_in_numpy_array(np.array(mask),"after GaussNoise target")
-        return ImageBlockReplacement.MultiChannelImage.create( np.array(np.transpose(aug["image"],(2,0,1)),dtype=np.float32)), PILMask.create(aug["mask"])
+        return ImageBlockReplacement.MultiChannelImage.create( np.array(np.transpose(aug_image,(2,0,1)),dtype=np.float32)), PILMask.create(aug_mask)
 class SegmentationAlbumentationsTransformTRanspose(ItemTransform):
     def __init__(self,split_idx):
         ItemTransform.__init__(self,split_idx=split_idx)
@@ -311,7 +373,7 @@ class SegmentationAlbumentationsTransformTRanspose(ItemTransform):
         #check_for_nan_in_tensor(img,"before transpose")
         #albumetations asume the order of the channels is h,w,channels but the tensors are channels,h,w 
         img= np.transpose(img,(1,2,0))
-        img=np.array(img,dtype=np.uint8).astype(np.uint8).copy()
+        img=_as_float_hwc(img)
         aug = self.aug(image=img, mask=np.array(mask))
         #check_for_nan_in_numpy_array(aug["image"],"after transpose")
         #if the transformation introduced nan in the data, use the original data instead
@@ -331,8 +393,9 @@ class SegmentationAlbumentationsTransformBrightness(ItemTransform):
         #check_for_nan_in_tensor(img,"before brigntes")
         #albumetations asume the order of the channels is h,w,channels but the tensors are channels,h,w 
         img= np.transpose(img,(1,2,0))
-        img=np.array(img,dtype=np.uint8).astype(np.uint8).copy()
-        aug = self.aug(image=img, mask=np.array(mask))
+        # RandomBrightness is float-UNSAFE (same [0,1] assumption as GaussNoise), so it runs on the
+        # uint8 imagery bands only; elevation passes through untouched.
+        aug_image, aug_mask = _augment_intensity_uint8_bands(self.aug, img, mask)
         #check_for_nan_in_numpy_array(aug["image"],"after brighntes")
         #if the transformation introduced nan in the data, use the original data instead
         #if np.isnan(aug["image"]).any():
@@ -340,7 +403,7 @@ class SegmentationAlbumentationsTransformBrightness(ItemTransform):
         #after transfomr is donw we need to transpose the tensor back to channels,h,w
         #check_for_nan_in_numpy_array(aug["image"],"after aug data")
         #check_for_nan_in_numpy_array(np.array(mask),"after GaussNoise target")
-        return ImageBlockReplacement.MultiChannelImage.create(np.array(np.transpose(aug["image"],(2,0,1)),dtype=np.float32)), PILMask.create(aug["mask"])
+        return ImageBlockReplacement.MultiChannelImage.create(np.array(np.transpose(aug_image,(2,0,1)),dtype=np.float32)), PILMask.create(aug_mask)
         
         """
         if type(self.aug) is RandomShadow:
@@ -351,7 +414,7 @@ class SegmentationAlbumentationsTransformBrightness(ItemTransform):
             #input(numpy_image.shape)
             #input(numpy_image[:,:,0:1].shape)
             img= np.transpose(img,(1,2,0))
-            img=np.array(img,dtype=np.uint8).astype(np.uint8).copy()
+            img=_as_float_hwc(img)
             aug = self.aug(image=img, mask=np.array(mask))
             #return aug["image"], PILMask.create(aug["mask"])
             return np.array(np.transpose(aug["image"],(2,0,1)),dtype=np.float32), PILMask.create(aug["mask"])
@@ -377,7 +440,7 @@ class ColorJitter(ItemTransform):
         #check_for_nan_in_tensor(img,"before brigntes")
         #albumetations asume the order of the channels is h,w,channels but the tensors are channels,h,w
         img= np.transpose(img,(1,2,0))
-        img=np.array(img,dtype=np.uint8).astype(np.uint8).copy()
+        img=_as_float_hwc(img)
         augmented_rgb = self.aug(image=img[:,:,:3], mask=np.array(mask))
         extra_channels = img[:, :, 3:]  # Fourth channel (e.g., Alpha or NIR)
         # Reattach the extra channels
@@ -415,7 +478,7 @@ class SegmentationAlbumentationsTransformSHADOW(ItemTransform):
         img,mask = x
         #albumetations asume the order of the channels is h,w,channels but the tensors are channels,h,w
         img= np.transpose(img,(1,2,0))
-        img=np.array(img,dtype=np.uint8).astype(np.uint8).copy()
+        img=_as_float_hwc(img)
         aug= self.aug(image=img, mask=np.array(mask))
 
         """
