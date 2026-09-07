@@ -492,11 +492,437 @@ def emit_arms():
     print(f"Frozen matrix artifacts untouched: MANIFEST.md, run_spatial_matrix.cmd, the 144 configs")
 
 
+# ==================================================================================================
+# 2026-08-24 ARMS G + A  (Great Plan 3.1 sections 4.8 and 4.2, work order 2026-08-24)
+#
+# ADDITIVE, exactly like emit_arms() above: new filenames only, never overwrites, own manifest and
+# own launcher. The frozen 144 configs, MANIFEST.md, run_spatial_matrix.cmd, the 2026-08-15 arm
+# configs, MANIFEST_arms_2026_08.md and run_arms_2026_08.cmd are all untouched.
+#
+#   Arm G  convnext_upernet_ortorgb                 n_in=3
+#          3 bands from the spring leaf-off orthophoto (OrtoRGB), at the SAME ImageNet constants the
+#          frozen convnext_upernet_rgb cell uses. The vectors are parsed out of that frozen config
+#          rather than retyped, so the swap is provably one variable: the image source. Measured
+#          Orto constants are deliberately NOT used -- identical normalisation treatment is the
+#          design (under ImageNet constants the Orto bands sit at effective std ~0.91, healthy).
+#
+#   Arm A  convnext_upernet_rgb_dsm_dtm_corrected   n_in=5
+#          RGB at ImageNet constants + DSM + DTM at the MEASURED corrected constants, loaded from
+#          the same corrected_channel_constants.json the 6ch_corrected configs load. No CIR band.
+#          Isolates corrected absolute elevation without the simultaneous NIR change that
+#          6ch_corrected bundled.
+#
+# Both are weighted-CE only, frozen split, 3 folds, ConvNeXt+UPerNet -> train.py.
+# ==================================================================================================
+FROZEN_RGB_REF = os.path.join(REPO, "configs", "matrix_configs", "train",
+                              "convnext_upernet_rgb_fold0.ini")
+GA_OUT_MANIFEST = os.path.join(REPO, "configs", "matrix_configs",
+                               "MANIFEST_arms_G_A_2026_08_24.md")
+GA_OUT_CMD = os.path.join(REPO, "configs", "matrix_configs", "run_arms_G_A.cmd")
+GA_SMOKE_INI = os.path.join(REPO, "configs", "matrix_configs",
+                            "smoke_rgb_dsm_dtm_corrected_convnext.ini")
+
+# Arm tag -> (channel tag, datatypes, channels, why). means/stds are built in _load_G_A_constants().
+ARM_G_A_GROUPS = [
+    ("G", "ortorgb", ["OrtoRGB"], [[0, 1, 2]], "convnext",
+     "base swap: spring leaf-off orthophoto in place of the skraafoto-programme nadir product, "
+     "one variable, ImageNet constants held identical to the frozen rgb cell"),
+    ("A", "rgb_dsm_dtm_corrected", ["rgb", "DSM", "DTM"], [[0, 1, 2], [0], [0]], "convnext",
+     "decomposition: corrected absolute elevation alone, without the NIR change 6ch_corrected "
+     "bundled with it"),
+]
+
+
+def _imagenet_from_frozen_rgb(ref=None):
+    """Parse the ImageNet mean/std vectors out of a frozen `<model>_rgb_fold0` config.
+
+    Copied programmatically, per the work order: retyping them would let the ortorgb arm drift away
+    from the cell it is supposed to differ from in exactly one respect. Each model reads its OWN
+    frozen rgb config, so the identical-treatment rule is enforced per model rather than assumed to
+    hold across the roster.
+    """
+    import configparser
+    FROZEN_RGB_REF = ref or globals()["FROZEN_RGB_REF"]
+    if not os.path.isfile(FROZEN_RGB_REF):
+        sys.exit(f"missing frozen reference config: {FROZEN_RGB_REF}")
+    cp = configparser.ConfigParser()
+    cp.read(FROZEN_RGB_REF)
+    dtypes = json.loads(cp.get("CONFIG", "datatypes"))
+    chans = json.loads(cp.get("CONFIG", "channels"))
+    means = json.loads(cp.get("CONFIG", "means"))
+    stds = json.loads(cp.get("CONFIG", "stds"))
+    # Fail loud if the reference is not the cell we think it is.
+    assert dtypes == ["rgb"], f"{FROZEN_RGB_REF}: datatypes {dtypes} != ['rgb']"
+    assert chans == [[0, 1, 2]], f"{FROZEN_RGB_REF}: channels {chans} != [[0,1,2]]"
+    assert len(means) == 3 and len(stds) == 3, f"{FROZEN_RGB_REF}: not a 3-band config"
+    return means, stds
+
+
+def _load_G_A_constants():
+    """means/stds per arm tag, every number loaded from an artifact, none transcribed."""
+    if not os.path.isfile(CORRECTED_JSON):
+        sys.exit(f"missing measured constants: {CORRECTED_JSON}\nrun corrected_channel_constants.py first")
+    with open(CORRECTED_JSON) as fh:
+        cc = json.load(fh)
+    imagenet_means, imagenet_stds = _imagenet_from_frozen_rgb()
+    dsm, dtm = cc["corrected_constants"]["DSM"], cc["corrected_constants"]["DTM"]
+
+    consts = {
+        # Arm G: the frozen rgb cell's own vectors, unmodified.
+        "ortorgb": (list(imagenet_means), list(imagenet_stds)),
+        # Arm A: ImageNet RGB + measured corrected DSM/DTM.
+        "rgb_dsm_dtm_corrected": (
+            list(imagenet_means) + [dsm["mean"], dtm["mean"]],
+            list(imagenet_stds) + [dsm["std"], dtm["std"]],
+        ),
+    }
+    # Cross-check against the 6ch_corrected vectors already on disk: arm A's DSM/DTM pair must be
+    # byte-identical to the last two entries of means_6ch_corrected / stds_6ch_corrected.
+    assert consts["rgb_dsm_dtm_corrected"][0][3:] == cc["means_6ch_corrected"][4:], \
+        "arm A DSM/DTM means diverge from the 6ch_corrected vector"
+    assert consts["rgb_dsm_dtm_corrected"][1][3:] == cc["stds_6ch_corrected"][4:], \
+        "arm A DSM/DTM stds diverge from the 6ch_corrected vector"
+    return consts, cc, imagenet_means, imagenet_stds
+
+
+def emit_arms_G_A():
+    consts, cc, imagenet_means, imagenet_stds = _load_G_A_constants()
+    os.makedirs(OUT_TRAIN, exist_ok=True)
+    os.makedirs(OUT_INFER, exist_ok=True)
+
+    written, refused = [], []
+    cells = {}
+    for arm, chan, dtypes, chans, mk, _why in ARM_G_A_GROUPS:
+        means, stds = consts[chan]
+        model_str, exp_dirname, prefix, _trainer = MODELS[mk]
+        exp_root = f"{MATRIX_ROOT}/{exp_dirname}"
+        for fold in range(3):
+            valid_txt = f"{SPLIT_DIR}/fold_{fold}_valid.txt"
+            train_job = f"{prefix}_{chan}_fold{fold}"       # weighted only -> no suffix
+            infer_job = f"infer_{train_job}"
+            for path, body in (
+                (os.path.join(OUT_TRAIN, f"{train_job}.ini"),
+                 train_config(model_str, dtypes, chans, means, stds, valid_txt,
+                              exp_root, train_job, CLASS_WEIGHTS)),
+                (os.path.join(OUT_INFER, f"{infer_job}.ini"),
+                 infer_config(model_str, dtypes, chans, means, stds, valid_txt,
+                              exp_root, train_job, infer_job)),
+            ):
+                if os.path.exists(path):
+                    refused.append(path)
+                    continue
+                with open(path, "w") as f:
+                    f.write(body)
+                written.append(path)
+            cells.setdefault((arm, chan), []).append((fold, train_job, exp_root))
+
+    if refused:
+        print("REFUSED to overwrite existing files:")
+        for p in refused:
+            print("   " + p)
+        sys.exit("aborting rather than overwriting -- nothing existing was modified")
+
+    # ---- G-D smoke for arm A only (new width 5 + new constants); arm G is a standard 3-band cell ----
+    smoke_chan = "rgb_dsm_dtm_corrected"
+    smoke_dtypes, smoke_chans = ["rgb", "DSM", "DTM"], [[0, 1, 2], [0], [0]]
+    smoke_means, smoke_stds = consts[smoke_chan]
+    if os.path.exists(GA_SMOKE_INI):
+        sys.exit(f"refusing to overwrite {GA_SMOKE_INI}")
+    smoke_body = train_config("convnext_base_upernet", smoke_dtypes, smoke_chans,
+                              smoke_means, smoke_stds, f"{SPLIT_DIR}/fold_0_valid.txt",
+                              f"{MATRIX_ROOT}/_smoke", "convnext_upernet_rgb_dsm_dtm_corrected_smoke",
+                              CLASS_WEIGHTS).replace("epochs = 10", "epochs = 1")
+    with open(GA_SMOKE_INI, "w") as f:
+        f.write("#G-D SMOKE (2026-08-24): 1 epoch on rgb_dsm_dtm_corrected (n_in=5), convnext. "
+                "Prepared by the agent, LAUNCHED BY THE AUTHOR.\n" + smoke_body)
+    written.append(GA_SMOKE_INI)
+
+    def score_cmd(arm, chan):
+        folds = sorted(cells[(arm, chan)])
+        exp_root = folds[0][2]
+        preds = " ".join(f"--pred_fold{fold} {exp_root}/{tj}/models/example_dataset"
+                         for fold, tj, _ in folds)
+        cell = f"oof_convnext_upernet_{chan}"
+        out = f"{exp_root}/{cell}"
+        return cell, out, (
+            f"src/ML_sdfi_fastai2/analyse/pooled_oof_metrics.py "
+            f"--fold_assignment {SPLIT_DIR}/fold_assignment.csv --all_txt {DATA}/data/all.txt "
+            f"--label_folder {DATA}/labels/splitted_labels --codes {DATA}/labels/codes.txt "
+            f"{preds} --out {out}")
+
+    # ---- manifest (dated sibling; MANIFEST_arms_2026_08.md is left untouched) ----
+    with open(GA_OUT_MANIFEST, "w") as f:
+        f.write("# Arms G and A - config manifest (2026-08-24)\n\n")
+        f.write("Additive to the frozen 72-run matrix AND to the 2026-08-15 arms. Nothing in\n"
+                "`MANIFEST.md`, `MANIFEST_arms_2026_08.md`, `run_spatial_matrix.cmd` or\n"
+                "`run_arms_2026_08.cmd` is touched. Great Plan 3.1 sections 4.8 (G) and 4.2 (A).\n\n")
+        f.write("Terminology: `OrtoRGB`/`OrtoCIR` are the spring leaf-off orthophoto; `rgb`/`cir`\n"
+                "are the skraafoto-programme nadir product (leaf-on, ~3-year cadence). All four are\n"
+                "geometrically nadir. The label \"oblique source\" is retired.\n\n")
+        f.write("## Channel configs\n\n")
+        f.write("**ortorgb** (n_in=3) - arm G, the base swap. 3 bands from the spring leaf-off\n"
+                "orthophoto. Normalisation constants are the ImageNet vectors parsed out of\n"
+                "`train/convnext_upernet_rgb_fold0.ini`, deliberately NOT measured Orto constants,\n"
+                "so the contrast against the frozen `convnext_upernet_rgb` cell changes exactly one\n"
+                "thing: the image source.\n\n")
+        f.write(f"- means {imagenet_means}, stds {imagenet_stds} (source: the frozen rgb config)\n")
+        f.write("- under these constants the Orto bands sit at effective std ~0.91 (EDA channel audit)\n\n")
+        f.write("**rgb_dsm_dtm_corrected** (n_in=5) - arm A, the decomposition. RGB at ImageNet\n"
+                "constants + DSM + DTM at the measured corrected constants. No CIR band, so\n"
+                "corrected absolute elevation is isolated from the NIR change that `6ch_corrected`\n"
+                "made at the same time.\n\n")
+        f.write("| band | matrix constant | this arm |\n|---|---|---|\n")
+        for band in ("DSM", "DTM"):
+            m, c = cc["matrix_constants"][band], cc["corrected_constants"][band]
+            f.write(f"| {band} | mean {m['mean']}, std {m['std']} | "
+                    f"mean {c['mean']:.8f}, std {c['std']:.8f} |\n")
+        f.write("\nSource: `corrected_channel_constants.json`, the same artifact the `6ch_corrected`\n"
+                "configs load; asserted byte-identical to its `means_6ch_corrected[4:]` /\n"
+                "`stds_6ch_corrected[4:]` entries at generation time.\n\n")
+        f.write("## Runs\n\n")
+        for arm, chan, _dt, _ch, mk, why in ARM_G_A_GROUPS:
+            f.write(f"- **Arm {arm}** - `{chan}`, {mk}, weighted, 3 folds = 3 runs. {why}\n")
+        f.write("\nGPU order: G first (author's priority, simplest config), then A. A carries a\n"
+                "1-epoch smoke (`smoke_rgb_dsm_dtm_corrected_convnext.ini`) because n_in=5 and the\n"
+                "corrected constants are both new; G needs none (standard 3-band width).\n\n")
+        f.write("**Both cells are descriptive, outside every Holm family** (Plan 3.1 D1). No\n"
+                "significance test is ever run on them.\n\n")
+        f.write("## Scoring\n\n")
+        for arm, chan, _dt, _ch, _mk, _why in ARM_G_A_GROUPS:
+            cell, _out, cmd = score_cmd(arm, chan)
+            f.write(f"- `{cell}`\n\n      python {cmd}\n\n")
+
+    # ---- launcher ----
+    with open(GA_OUT_CMD, "w") as f:
+        f.write("@echo off\r\nREM Arms G (ortorgb) + A (rgb_dsm_dtm_corrected), 2026-08-24.\r\n")
+        f.write("REM Run from c:\\thesis\\ML_sdfi_fastai2.  The author launches this; it is not run "
+                "by the agent.\r\n")
+        f.write("REM Additive: does not touch the frozen 72-run matrix, the 2026-08-15 arms, or the "
+                "learning curve.\r\n")
+        f.write("REM BLOCK 1 = smoke + arm G.  BLOCK 2 = arm A, only after the smoke log is "
+                "reviewed.\r\n\r\n")
+        f.write("set PY=..\\envs\\ML_sdfi\\python.exe\r\n")
+        f.write("set BK=%PY% src/ML_sdfi_fastai2/analyse/backup_to_hf.py\r\n\r\n")
+        for arm, chan, _dt, _ch, mk, why in ARM_G_A_GROUPS:
+            trainer = MODELS[mk][3]
+            block = "1" if arm == "G" else "2"
+            f.write(f"REM ============ BLOCK {block} / ARM {arm}: {chan} ({why}) ============\r\n")
+            if arm == "A":
+                f.write("REM Run the smoke FIRST and read its log before this block:\r\n")
+                f.write(f"REM %PY% src/ML_sdfi_fastai2/{trainer} "
+                        f"--config configs/matrix_configs/smoke_rgb_dsm_dtm_corrected_convnext.ini\r\n")
+            for fold in range(3):
+                tj = f"convnext_upernet_{chan}_fold{fold}"
+                f.write(f"%PY% src/ML_sdfi_fastai2/{trainer} "
+                        f"--config configs/matrix_configs/train/{tj}.ini\r\n")
+                f.write(f"%BK% --file {MATRIX_ROOT}/convnext_upernet/{tj}/models/{tj}.pth "
+                        f"--path_in_repo models/{tj}.pth\r\n")
+            for fold in range(3):
+                tj = f"convnext_upernet_{chan}_fold{fold}"
+                f.write(f"%PY% src/ML_sdfi_fastai2/infer.py "
+                        f"--config configs/matrix_configs/infer/infer_{tj}.ini\r\n")
+            cell, out, cmd = score_cmd(arm, chan)
+            f.write(f"%PY% {cmd}\r\n")
+            f.write(f"%BK% --file {out}/pooled_oof_metrics.json "
+                    f"--path_in_repo results/oof/{cell}.json\r\n\r\n")
+        f.write("%BK% --sync_all\r\n")
+
+    n_cfg = len([p for p in written if os.path.dirname(p) in (OUT_TRAIN, OUT_INFER)])
+    print(f"Wrote {n_cfg} new config files ({n_cfg // 2} train + {n_cfg // 2} infer), 0 overwritten")
+    print(f"Wrote smoke   -> {GA_SMOKE_INI}")
+    print(f"Wrote manifest-> {GA_OUT_MANIFEST}")
+    print(f"Wrote launcher-> {GA_OUT_CMD}")
+    print("Untouched: MANIFEST.md, run_spatial_matrix.cmd, MANIFEST_arms_2026_08.md, "
+          "run_arms_2026_08.cmd, the frozen 144 configs, the 2026-08-15 arm configs")
+
+
+# ==================================================================================================
+# 2026-08-25 OPTION 2: full-roster completion of arms G and A  (Great Plan 3.1 s11.5)
+#
+# The author's rule: every arm intervention is replicated across the entire declared four-model
+# roster. ConvNeXt's G and A cells are already in flight; this emits the remaining six --
+# `ortorgb` and `rgb_dsm_dtm_corrected` for resnet34+UNet, Swin+UPerNet and SegFormer-B1.
+#
+# ADDITIVE, same discipline as every arms path above: new filenames only, never overwrites, own
+# manifest and launcher. Each model's ImageNet vectors are parsed from ITS OWN frozen rgb config.
+# ==================================================================================================
+ROSTER_OUT_MANIFEST = os.path.join(REPO, "configs", "matrix_configs",
+                                   "MANIFEST_arms_roster_2026_08_25.md")
+ROSTER_OUT_CMD = os.path.join(REPO, "configs", "matrix_configs", "run_arms_roster.cmd")
+
+# Model key -> (channel tag -> smoke needed?). Width 5 has only ever been forwarded through the
+# ConvNeXt wrapper, so every other model needs its own 5-channel smoke before its arm-A cell runs.
+ROSTER_MODELS = ["resnet", "swin", "segformer"]
+ROSTER_CHANNELS = ["ortorgb", "rgb_dsm_dtm_corrected"]
+# Launch order: production model first, then each model's two cells together.
+ROSTER_ORDER = [(m, c) for m in ROSTER_MODELS for c in ROSTER_CHANNELS]
+
+
+def _roster_constants(mk):
+    """means/stds for one model's two arm cells, every number loaded from an artifact."""
+    prefix = MODELS[mk][2]
+    ref = os.path.join(REPO, "configs", "matrix_configs", "train", f"{prefix}_rgb_fold0.ini")
+    im_mean, im_std = _imagenet_from_frozen_rgb(ref)
+    with open(CORRECTED_JSON) as fh:
+        cc = json.load(fh)
+    dsm, dtm = cc["corrected_constants"]["DSM"], cc["corrected_constants"]["DTM"]
+    return {
+        "ortorgb": (["OrtoRGB"], [[0, 1, 2]], list(im_mean), list(im_std)),
+        "rgb_dsm_dtm_corrected": (
+            ["rgb", "DSM", "DTM"], [[0, 1, 2], [0], [0]],
+            list(im_mean) + [dsm["mean"], dtm["mean"]],
+            list(im_std) + [dsm["std"], dtm["std"]],
+        ),
+    }, ref
+
+
+def emit_arms_roster():
+    if not os.path.isfile(CORRECTED_JSON):
+        sys.exit(f"missing measured constants: {CORRECTED_JSON}")
+    os.makedirs(OUT_TRAIN, exist_ok=True)
+    os.makedirs(OUT_INFER, exist_ok=True)
+
+    written, refused, refs = [], [], {}
+    for mk in ROSTER_MODELS:
+        consts, ref = _roster_constants(mk)
+        refs[mk] = ref
+        model_str, exp_dirname, prefix, _trainer = MODELS[mk]
+        exp_root = f"{MATRIX_ROOT}/{exp_dirname}"
+        for chan in ROSTER_CHANNELS:
+            dtypes, chans, means, stds = consts[chan]
+            for fold in range(3):
+                valid_txt = f"{SPLIT_DIR}/fold_{fold}_valid.txt"
+                train_job = f"{prefix}_{chan}_fold{fold}"
+                infer_job = f"infer_{train_job}"
+                for path, body in (
+                    (os.path.join(OUT_TRAIN, f"{train_job}.ini"),
+                     train_config(model_str, dtypes, chans, means, stds, valid_txt,
+                                  exp_root, train_job, CLASS_WEIGHTS)),
+                    (os.path.join(OUT_INFER, f"{infer_job}.ini"),
+                     infer_config(model_str, dtypes, chans, means, stds, valid_txt,
+                                  exp_root, train_job, infer_job)),
+                ):
+                    if os.path.exists(path):
+                        refused.append(path)
+                        continue
+                    with open(path, "w") as f:
+                        f.write(body)
+                    written.append(path)
+
+    if refused:
+        print("REFUSED to overwrite existing files:")
+        for p in refused:
+            print("   " + p)
+        sys.exit("aborting rather than overwriting -- nothing existing was modified")
+
+    # ---- one 5-channel smoke per model: width 5 has only been forwarded through ConvNeXt ----
+    smokes = []
+    for mk in ROSTER_MODELS:
+        consts, _ref = _roster_constants(mk)
+        dtypes, chans, means, stds = consts["rgb_dsm_dtm_corrected"]
+        model_str, _exp, prefix, trainer = MODELS[mk]
+        path = os.path.join(REPO, "configs", "matrix_configs",
+                            f"smoke_rgb_dsm_dtm_corrected_{mk}.ini")
+        if os.path.exists(path):
+            sys.exit(f"refusing to overwrite {path}")
+        body = train_config(model_str, dtypes, chans, means, stds,
+                            f"{SPLIT_DIR}/fold_0_valid.txt", f"{MATRIX_ROOT}/_smoke",
+                            f"{prefix}_rgb_dsm_dtm_corrected_smoke",
+                            CLASS_WEIGHTS).replace("epochs = 10", "epochs = 1")
+        with open(path, "w") as f:
+            f.write(f"#G-D SMOKE (2026-08-25): 1 epoch on rgb_dsm_dtm_corrected (n_in=5), {mk} via "
+                    f"{trainer}. Width 5 has only ever been forwarded through ConvNeXt.\n"
+                    f"#Prepared by the agent, LAUNCHED BY THE AUTHOR.\n" + body)
+        written.append(path)
+        smokes.append((mk, trainer, os.path.basename(path)))
+
+    def score_cmd(mk, chan):
+        _model_str, exp_dirname, prefix, _tr = MODELS[mk]
+        exp_root = f"{MATRIX_ROOT}/{exp_dirname}"
+        preds = " ".join(f"--pred_fold{f} {exp_root}/{prefix}_{chan}_fold{f}/models/example_dataset"
+                         for f in range(3))
+        cell = f"oof_{prefix}_{chan}"
+        return cell, f"{exp_root}/{cell}", (
+            f"src/ML_sdfi_fastai2/analyse/pooled_oof_metrics.py "
+            f"--fold_assignment {SPLIT_DIR}/fold_assignment.csv --all_txt {DATA}/data/all.txt "
+            f"--label_folder {DATA}/labels/splitted_labels --codes {DATA}/labels/codes.txt "
+            f"{preds} --out {exp_root}/{cell}")
+
+    with open(ROSTER_OUT_MANIFEST, "w") as f:
+        f.write("# Option 2 full-roster arms - config manifest (2026-08-25)\n\n")
+        f.write("Great Plan 3.1 s11.5: every arm intervention is replicated across the entire\n"
+                "declared four-model roster. ConvNeXt's `ortorgb` and `rgb_dsm_dtm_corrected` cells\n"
+                "were emitted 2026-08-24; this file covers the remaining six.\n\n")
+        f.write("Additive. `MANIFEST.md`, `MANIFEST_arms_2026_08.md`,\n"
+                "`MANIFEST_arms_G_A_2026_08_24.md`, `run_spatial_matrix.cmd`,\n"
+                "`run_arms_2026_08.cmd` and `run_arms_G_A.cmd` are untouched.\n\n")
+        f.write("Terminology: `OrtoRGB`/`OrtoCIR` are the spring leaf-off orthophoto; `rgb`/`cir`\n"
+                "are the skraafoto-programme nadir product (leaf-on, ~3-year cadence). All four are\n"
+                "geometrically nadir. The label \"oblique source\" is retired.\n\n")
+        f.write("## Cells\n\n| cell | n_in | datatypes | trainer | ImageNet source |\n")
+        f.write("|---|---:|---|---|---|\n")
+        for mk, chan in ROSTER_ORDER:
+            _ms, _ed, prefix, trainer = MODELS[mk]
+            n_in = 3 if chan == "ortorgb" else 5
+            dt = "OrtoRGB" if chan == "ortorgb" else "rgb, DSM, DTM"
+            f.write(f"| `{prefix}_{chan}` | {n_in} | {dt} | `{trainer}` | "
+                    f"`{os.path.basename(refs[mk])}` |\n")
+        f.write("\nEvery `ortorgb` cell carries the ImageNet vectors parsed from its OWN model's\n"
+                "frozen rgb config, so each swap changes exactly one thing: the image source.\n"
+                "Every `rgb_dsm_dtm_corrected` cell carries ImageNet RGB plus the measured\n"
+                "corrected DSM/DTM from `corrected_channel_constants.json`, no CIR band.\n\n")
+        f.write("## Smokes (width 5 has only ever been forwarded through ConvNeXt)\n\n")
+        for mk, trainer, name in smokes:
+            f.write(f"- `{name}` - {mk} via `{trainer}`, 1 epoch, fold 0\n")
+        f.write("\n## Scoring (only after the pre-declarations are locked)\n\n")
+        for mk, chan in ROSTER_ORDER:
+            cell, _out, cmd = score_cmd(mk, chan)
+            f.write(f"- `{cell}`\n\n      python {cmd}\n\n")
+        f.write("All six cells are **descriptive, outside every Holm family** (declaration D1).\n")
+
+    with open(ROSTER_OUT_CMD, "w") as f:
+        f.write("@echo off\r\nREM Option 2 full-roster arms, 2026-08-25 (Great Plan 3.1 s11.5).\r\n")
+        f.write("REM Run from c:\\thesis\\ML_sdfi_fastai2.  The author launches this.\r\n")
+        f.write("REM Order: three 5-channel smokes, then production model first.\r\n")
+        f.write("REM Stops at inference: scoring only after the declarations are locked.\r\n\r\n")
+        f.write("set PY=..\\envs\\ML_sdfi\\python.exe\r\n\r\n")
+        f.write("REM ---- 5-channel smokes (one per model; ConvNeXt already smoked) ----\r\n")
+        for mk, trainer, name in smokes:
+            f.write(f"%PY% src/ML_sdfi_fastai2/{trainer} "
+                    f"--config configs/matrix_configs/{name}\r\n")
+        f.write("\r\n")
+        for mk, chan in ROSTER_ORDER:
+            _ms, _ed, prefix, trainer = MODELS[mk]
+            f.write(f"REM ================= {prefix}_{chan} =================\r\n")
+            for fold in range(3):
+                f.write(f"%PY% src/ML_sdfi_fastai2/{trainer} "
+                        f"--config configs/matrix_configs/train/{prefix}_{chan}_fold{fold}.ini\r\n")
+            for fold in range(3):
+                f.write(f"%PY% src/ML_sdfi_fastai2/infer.py --config "
+                        f"configs/matrix_configs/infer/infer_{prefix}_{chan}_fold{fold}.ini\r\n")
+            f.write("\r\n")
+
+    n_cfg = len([p for p in written if os.path.dirname(p) in (OUT_TRAIN, OUT_INFER)])
+    print(f"Wrote {n_cfg} new config files ({n_cfg // 2} train + {n_cfg // 2} infer), 0 overwritten")
+    print(f"Wrote {len(smokes)} smoke configs (one per model at width 5)")
+    print(f"Wrote manifest-> {ROSTER_OUT_MANIFEST}")
+    print(f"Wrote launcher-> {ROSTER_OUT_CMD}")
+    for mk in ROSTER_MODELS:
+        print(f"  {mk:<10} ImageNet vectors read from {os.path.basename(refs[mk])}")
+    print("Untouched: every earlier manifest, launcher and config")
+
+
 if __name__ == "__main__":
     if "--arms-2026-08" in sys.argv:
         emit_arms()
+    elif "--arms-G-A-2026-08-24" in sys.argv:
+        emit_arms_G_A()
+    elif "--arms-roster-2026-08-25" in sys.argv:
+        emit_arms_roster()
     else:
         sys.exit("refusing to regenerate the frozen 72-run matrix configs.\n"
                  "main() would overwrite the 144 configs, MANIFEST.md and run_spatial_matrix.cmd, "
                  "which are the provenance record of the completed matrix.\n"
-                 "Pass --arms-2026-08 to emit only the new nDSM / corrected-normalisation configs.")
+                 "Pass --arms-2026-08 to emit only the nDSM / corrected-normalisation configs, or\n"
+                 "--arms-G-A-2026-08-24 to emit only the 2026-08-24 arms G (ortorgb) and A "
+                 "(rgb_dsm_dtm_corrected).")

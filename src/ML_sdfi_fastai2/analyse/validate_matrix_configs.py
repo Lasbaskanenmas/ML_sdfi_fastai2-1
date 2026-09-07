@@ -26,10 +26,27 @@ INFER_DIR = r"c:\thesis\ML_sdfi_fastai2\configs\matrix_configs\infer"
 
 CHAN_N = {"rgb": 3, "6ch": 6, "10ch": 10,
           # 2026-08-15 arms (work order 2026-08-13)
-          "rgb_ndsm": 4, "6ch_corrected": 6}
+          "rgb_ndsm": 4, "6ch_corrected": 6,
+          # 2026-08-24 arms G and A (work order 2026-08-24, Great Plan 3.1 s4.8 / s4.2)
+          "ortorgb": 3, "rgb_dsm_dtm_corrected": 5}
 FROZEN_TAGS = {"rgb", "6ch", "10ch"}          # the completed 72-run matrix
-ARM_TAGS = {"rgb_ndsm", "6ch_corrected"}      # the additive arms
+ARM_TAGS = {"rgb_ndsm", "6ch_corrected",      # the additive arms
+            "ortorgb", "rgb_dsm_dtm_corrected"}
 EXPECTED_FROZEN = 72
+
+# Datatype folders expected per channel tag. Only asserted for tags listed here, so the frozen
+# matrix's checks are unchanged.
+EXPECTED_DATATYPES = {
+    "ortorgb": ["OrtoRGB"],
+    "rgb_dsm_dtm_corrected": ["rgb", "DSM", "DTM"],
+}
+# Arm G's whole validity rests on it carrying the SAME constants as the frozen rgb cell, and arm A's
+# on its DSM/DTM pair being the measured corrected values. Both are asserted here rather than trusted.
+IMAGENET_MEAN = [0.485, 0.456, 0.406]
+IMAGENET_STD = [0.229, 0.224, 0.225]
+CORRECTED_JSON = os.path.join(os.path.dirname(r"c:\thesis\ML_sdfi_fastai2"),
+                              "exploratory_data_analysis", "results", "tables",
+                              "corrected_channel_constants.json")
 MODELS = {"resnet34", "segformer-b1", "convnext_base_upernet", "swin-base-upernet"}
 W = [1.0, 0.03350504084927361, 0.03715017822219386, 0.03834847724846554,
      0.033495723390315646, 2.3584697404377573, 6.318921707906307,
@@ -37,8 +54,39 @@ W = [1.0, 0.03350504084927361, 0.03715017822219386, 0.03834847724846554,
 # Longer tags first: alternation is ordered, so "rgb_ndsm" must be tried before "rgb".
 # The optional _lc<NN> group is the Plan 3.0 section 4 learning curve, which reuses a channel tag but
 # trains on a whole-route subset of the pool.
-JOB_RE = re.compile(r"_(rgb_ndsm|6ch_corrected|rgb|6ch|10ch)(_lc\d+)?_fold([012])(_unw)?$")
+JOB_RE = re.compile(r"_(rgb_dsm_dtm_corrected|rgb_ndsm|6ch_corrected|ortorgb|rgb|6ch|10ch)"
+                    r"(_lc\d+)?_fold([012])(_unw)?$")
 LC_POOL_DIR = "learning_curve"
+
+
+def _corrected_dsm_dtm():
+    """The measured corrected DSM/DTM constants, read from the artifact the configs were built from."""
+    with open(CORRECTED_JSON) as fh:
+        cc = json.load(fh)
+    c = cc["corrected_constants"]
+    return ([c["DSM"]["mean"], c["DTM"]["mean"]], [c["DSM"]["std"], c["DTM"]["std"]])
+
+
+_MODEL_PREFIXES = ["unet_resnet34", "segformer_b1", "convnext_upernet", "swin_upernet"]
+
+
+def _frozen_rgb_constants(base, _cache={}):
+    """The means/stds of the frozen `<model>_rgb_fold0` cell this job belongs to.
+
+    An arm cell is only an honest one-variable swap against its own model's frozen rgb cell, so the
+    reference is resolved per model rather than compared to a hard-coded ImageNet literal.
+    """
+    prefix = next((p for p in sorted(_MODEL_PREFIXES, key=len, reverse=True)
+                   if base.startswith(p)), None)
+    assert prefix, f"cannot identify the model prefix of job {base}"
+    if prefix not in _cache:
+        ref = os.path.join(TRAIN_DIR, f"{prefix}_rgb_fold0.ini")
+        assert os.path.isfile(ref), f"missing frozen reference {ref}"
+        cp = configparser.ConfigParser()
+        cp.read(ref)
+        _cache[prefix] = (json.loads(cp.get("CONFIG", "means")),
+                          json.loads(cp.get("CONFIG", "stds")))
+    return _cache[prefix]
 
 
 def get(cp, key):
@@ -62,6 +110,27 @@ def check(path, is_train):
     assert n_in == sum(len(c) for c in channels), \
         f"{path}: len(means)={n_in} != channels total {sum(len(c) for c in channels)}"
     assert n_in == CHAN_N[chan], f"{path}: n_in {n_in} != expected {CHAN_N[chan]} for tag {chan}"
+
+    if chan in EXPECTED_DATATYPES:
+        dtypes = json.loads(get(cp, "datatypes"))
+        assert dtypes == EXPECTED_DATATYPES[chan], \
+            f"{path}: datatypes {dtypes} != {EXPECTED_DATATYPES[chan]} for tag {chan}"
+    if chan == "ortorgb":
+        # The base swap must change the source and NOTHING else: the same ImageNet constants the
+        # SAME MODEL's frozen rgb cell carries, deliberately not measured Orto constants. Checked
+        # against that model's own frozen config rather than against a literal, so the
+        # identical-treatment rule is enforced per model across the Option 2 roster.
+        ref_means, ref_stds = _frozen_rgb_constants(base)
+        assert means == ref_means and stds == ref_stds, \
+            f"{path}: ortorgb constants {means}/{stds} != this model's frozen rgb cell " \
+            f"{ref_means}/{ref_stds}"
+    if chan == "rgb_dsm_dtm_corrected":
+        cm, cs = _corrected_dsm_dtm()
+        ref_means, ref_stds = _frozen_rgb_constants(base)
+        assert means[:3] == ref_means and stds[:3] == ref_stds, \
+            f"{path}: RGB bands must match this model's frozen rgb cell, got {means[:3]}/{stds[:3]}"
+        assert means[3:] == cm and stds[3:] == cs, \
+            f"{path}: DSM/DTM constants {means[3:]}/{stds[3:]} != measured corrected {cm}/{cs}"
 
     model = get(cp, "model")
     assert model in MODELS, f"{path}: unexpected model {model}"
@@ -136,7 +205,10 @@ def main():
     print(f"  - additive 2026-08 arms : {tally['arm_train']} train + {tally['arm_infer']} infer")
     print(f"  - learning curve (3.0 s4): {tally['lc_train']} train + {tally['lc_infer']} infer "
           f"(whole-route subsets, held-out fold unchanged)")
-    print("  - n_in matches channel tag (rgb=3 / 6ch=6 / 10ch=10 / rgb_ndsm=4 / 6ch_corrected=6)")
+    print("  - n_in matches channel tag (rgb=3 / 6ch=6 / 10ch=10 / rgb_ndsm=4 / 6ch_corrected=6 /"
+          " ortorgb=3 / rgb_dsm_dtm_corrected=5)")
+    print("  - ortorgb carries ITS OWN model's frozen rgb constants (one variable: the source)")
+    print("  - rgb_dsm_dtm_corrected carries measured corrected DSM/DTM + ImageNet RGB")
     print("  - each reads its fold_<f>_valid.txt; train keeps all.txt as the pool")
     print("  - training configs carry the locked 11-value weighted-CE vector + cross_entropy")
     print("  - pure bf16 (tf32 OFF); to_bf16/cudnn_benchmark/pin_memory true, to_fp16 false")
